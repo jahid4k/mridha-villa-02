@@ -1,25 +1,48 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind CSS v4 */
+@import "tailwindcss";
 
+/* ─── Theme tokens ─────────────────────────────────────── */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --color-background: #f8fafc;
+  --color-foreground: #0f172a;
+
+  /* Extend with any custom tokens here if needed */
+}
+
+/* ─── Base styles ──────────────────────────────────────── */
 @layer base {
-  :root {
-    --background: 248 250 252;
-    --foreground: 15 23 42;
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
   }
 
-  * {
-    border-color: #e2e8f0;
-    box-sizing: border-box;
+  html {
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
     background-color: #f8fafc;
     color: #0f172a;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.5;
+  }
+
+  /* Default border color for all elements */
+  *,
+  *::before,
+  *::after {
+    border-color: #e2e8f0;
   }
 }
 
-/* Scrollbar */
+/* ─── Scrollbar ────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -35,7 +58,7 @@
   background: #94a3b8;
 }
 
-/* Print styles */
+/* ─── Print ────────────────────────────────────────────── */
 @media print {
   .no-print {
     display: none !important;
