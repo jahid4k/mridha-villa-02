@@ -7,6 +7,7 @@ export async function middleware(req: NextRequest) {
   // Skip middleware for these paths
   const skipPaths = [
     '/api/auth',
+    '/api/cron', // checks CRON_SECRET itself
     '/_next',
     '/favicon.ico',
     '/public',

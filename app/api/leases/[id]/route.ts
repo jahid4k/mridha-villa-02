@@ -5,6 +5,9 @@ import Lease from '@/models/Lease';
 import Unit from '@/models/Unit';
 import Tenant from '@/models/Tenant';
 import { createAuditLog, getChangedFields, sanitizeForAudit } from '@/lib/audit';
+import { ensureMonthlyCharges } from '@/lib/billing';
+import { translateError } from '@/lib/i18n';
+import { getLang } from '@/lib/i18n/server';
 import { updateLeaseSchema } from '@/lib/validators';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -14,8 +17,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   await connectDB();
   const { id } = await params;
   const lease = await Lease.findById(id)
-    .populate('tenantId', 'name phone businessName')
-    .populate('unitIds', 'unitName unitNumber unitType assignedCollector')
+    .populate('tenantId', 'name phone businessName nidNumber permanentAddress guardianName profilePhoto email')
+    .populate('unitIds', 'unitName unitNumber unitType assignedCollector floorOrLocation hasElectricitySubMeter')
     .lean();
 
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
@@ -43,12 +46,55 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const username = (session.user as any).username;
   const prevData = sanitizeForAudit(existing.toObject());
+  const prevUnitIds = existing.unitIds.map((u: any) => String(u));
+
+  // Changing units on an active lease: the new units must not be rented elsewhere.
+  const newUnitIds = parsed.data.unitIds;
+  if (newUnitIds && existing.status === 'active') {
+    const conflicting = await Lease.find({
+      _id: { $ne: existing._id },
+      unitIds: { $in: newUnitIds },
+      status: 'active',
+    })
+      .populate('tenantId', 'name')
+      .populate('unitIds', 'unitName');
+    if (conflicting.length > 0) {
+      const taken = conflicting.flatMap((l: any) =>
+        l.unitIds
+          .filter((u: any) => newUnitIds.includes(String(u._id)))
+          .map((u: any) => `${u.unitName} (${l.tenantId?.name ?? 'another tenant'})`),
+      );
+      return NextResponse.json(
+        { error: translateError(await getLang(), 'Already rented: {units}. End that lease first.', { units: taken.join(', ') }) },
+        { status: 409 },
+      );
+    }
+  }
 
   if (parsed.data.startDate) parsed.data.startDate = new Date(parsed.data.startDate) as any;
   if (parsed.data.endDate) parsed.data.endDate = new Date(parsed.data.endDate) as any;
 
   Object.assign(existing, parsed.data, { updatedBy: username });
   await existing.save();
+
+  // Keep unit occupancy in step with the lease's units.
+  if (newUnitIds && existing.status === 'active') {
+    const removed = prevUnitIds.filter((u: string) => !newUnitIds.includes(u));
+    if (removed.length > 0) {
+      await Unit.updateMany(
+        { _id: { $in: removed }, currentLeaseId: existing._id },
+        { status: 'vacant', $unset: { currentLeaseId: '', currentTenantId: '' }, updatedBy: username },
+      );
+    }
+    await Unit.updateMany(
+      { _id: { $in: newUnitIds } },
+      { status: 'occupied', currentLeaseId: existing._id, currentTenantId: existing.tenantId, updatedBy: username },
+    );
+  }
+
+  if (existing.status === 'active') {
+    await ensureMonthlyCharges({ leaseId: id });
+  }
 
   await createAuditLog({
     entityType: 'lease',
@@ -82,9 +128,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     lease.updatedBy = username;
     await lease.save();
 
-    // Free up units
+    // Free up units, but only those still pointing at this lease.
     await Unit.updateMany(
-      { _id: { $in: lease.unitIds } },
+      {
+        _id: { $in: lease.unitIds },
+        $or: [{ currentLeaseId: lease._id }, { currentLeaseId: null }],
+      },
       {
         status: 'vacant',
         $unset: { currentLeaseId: '', currentTenantId: '' },
@@ -92,12 +141,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     );
 
-    // Remove from tenant active leases
-    await Tenant.findByIdAndUpdate(lease.tenantId, {
-      $pull: { activeLeaseIds: lease._id },
-      status: 'previous',
-      updatedBy: username,
+    // The tenant becomes "previous" only if they have no other active lease.
+    const otherActive = await Lease.exists({
+      tenantId: lease.tenantId,
+      status: 'active',
+      _id: { $ne: lease._id },
     });
+    if (!otherActive) {
+      await Tenant.findByIdAndUpdate(lease.tenantId, {
+        status: 'previous',
+        updatedBy: username,
+      });
+    }
 
     await createAuditLog({
       entityType: 'lease',

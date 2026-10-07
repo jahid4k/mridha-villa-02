@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/db';
 import ElectricitySetting from '@/models/ElectricitySetting';
+import ElectricityBill from '@/models/ElectricityBill';
 import { createAuditLog } from '@/lib/audit';
+import { billStatus, calculateElectricityBill } from '@/lib/calculations';
 import { createElectricitySettingSchema } from '@/lib/validators';
 
 export async function GET(req: NextRequest) {
@@ -39,22 +41,57 @@ export async function POST(req: NextRequest) {
   }
 
   const username = (session.user as any).username;
-  const { month, year, globalRatePerUnit, notes } = parsed.data;
+  const { month, year, globalRatePerUnit, notes, applyToExisting } = parsed.data;
 
+  const previous: any = await ElectricitySetting.findOne({ month, year }).lean();
   const setting = await ElectricitySetting.findOneAndUpdate(
     { month, year },
-    { globalRatePerUnit, notes, updatedBy: username, createdBy: username },
+    {
+      $set: { globalRatePerUnit, notes, updatedBy: username },
+      $setOnInsert: { createdBy: username },
+    },
     { upsert: true, new: true }
   );
+
+  // Optionally re-price this month's bills that aren't fully paid. A bill is
+  // skipped if it would end up costing less than what's already been paid.
+  let repriced = 0;
+  let skipped = 0;
+  if (applyToExisting) {
+    const bills = await ElectricityBill.find({ month, year, status: { $in: ['unpaid', 'partial'] } });
+    for (const bill of bills) {
+      const calc = calculateElectricityBill({
+        previousReading: bill.previousReading,
+        currentReading: bill.currentReading,
+        globalRatePerUnit,
+        manualAdjustment: bill.manualAdjustment,
+      });
+      if (calc.finalAmount < bill.paidAmount) {
+        skipped++;
+        continue;
+      }
+      bill.globalRatePerUnit = globalRatePerUnit;
+      bill.calculatedAmount = calc.calculatedAmount;
+      bill.finalAmount = calc.finalAmount;
+      const { dueAmount, status } = billStatus(calc.finalAmount, bill.paidAmount);
+      bill.dueAmount = dueAmount;
+      bill.status = status;
+      bill.updatedBy = username;
+      await bill.save();
+      repriced++;
+    }
+  }
 
   await createAuditLog({
     entityType: 'setting',
     entityId: `elec-rate-${year}-${month}`,
     action: 'update',
     performedBy: username,
-    newData: { month, year, globalRatePerUnit },
-    note: `Set electricity rate for ${month}/${year}: ৳${globalRatePerUnit}/unit`,
+    previousData: previous ? { globalRatePerUnit: previous.globalRatePerUnit } : undefined,
+    newData: { month, year, globalRatePerUnit, repriced, skipped },
+    note: `Set electricity rate for ${month}/${year}: ৳${globalRatePerUnit}/unit` +
+      (applyToExisting ? ` (re-priced ${repriced} bill(s), skipped ${skipped})` : ''),
   });
 
-  return NextResponse.json({ setting }, { status: 201 });
+  return NextResponse.json({ setting, repriced, skipped }, { status: 201 });
 }

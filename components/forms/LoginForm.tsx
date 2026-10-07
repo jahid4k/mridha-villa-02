@@ -9,11 +9,13 @@ import { loginSchema } from '@/lib/validators';
 import { z } from 'zod';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { useI18n } from '@/components/providers/LanguageProvider';
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginForm() {
   const router = useRouter();
+  const { t } = useI18n();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -35,14 +37,14 @@ export default function LoginForm() {
       });
 
       if (result?.error) {
-        toast.error('Invalid username or password');
+        toast.error(t('Invalid username or password'));
       } else {
-        toast.success('Signed in successfully');
+        toast.success(t('Signed in successfully'));
         router.push('/dashboard');
         router.refresh();
       }
     } catch {
-      toast.error('Something went wrong. Please try again.');
+      toast.error(t('Something went wrong. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -52,30 +54,30 @@ export default function LoginForm() {
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1">
-          Username
+          {t('Username')}
         </label>
         <input
           {...register('username')}
           type="text"
           autoComplete="username"
-          placeholder="Enter your username"
+          placeholder={t('Enter your username')}
           className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
         />
         {errors.username && (
-          <p className="mt-1 text-xs text-red-600">{errors.username.message}</p>
+          <p className="mt-1 text-xs text-red-600">{t(errors.username.message ?? '')}</p>
         )}
       </div>
 
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1">
-          Password
+          {t('Password')}
         </label>
         <div className="relative">
           <input
             {...register('password')}
             type={showPassword ? 'text' : 'password'}
             autoComplete="current-password"
-            placeholder="Enter your password"
+            placeholder={t('Enter your password')}
             className="w-full px-3 py-2.5 pr-10 border border-slate-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
           />
           <button
@@ -87,7 +89,7 @@ export default function LoginForm() {
           </button>
         </div>
         {errors.password && (
-          <p className="mt-1 text-xs text-red-600">{errors.password.message}</p>
+          <p className="mt-1 text-xs text-red-600">{t(errors.password.message ?? '')}</p>
         )}
       </div>
 
@@ -99,10 +101,10 @@ export default function LoginForm() {
         {isLoading ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
-            Signing in...
+            {t('Signing in...')}
           </>
         ) : (
-          'Sign in'
+          t('Sign in')
         )}
       </button>
     </form>

@@ -8,24 +8,14 @@ import { Button } from '@/components/ui/Button';
 import { Modal, ConfirmDialog } from '@/components/ui/Modal';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import { Table, TableHead, TableBody, Th, Td, TableRow, EmptyState } from '@/components/ui/Table';
-import { formatBDT, formatDate, getMonthName } from '@/lib/formatters';
+import { formatExpenseCategory, todayInDhaka } from '@/lib/formatters';
+import { useI18n } from '@/components/providers/LanguageProvider';
+import { EXPENSE_CATEGORIES, EXPENSE_PAYERS } from '@/lib/expenseOptions';
 
-const MONTHS = Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: getMonthName(i + 1) }));
-const YEARS = Array.from({ length: 4 }, (_, i) => ({ value: String(new Date().getFullYear() - 1 + i), label: String(new Date().getFullYear() - 1 + i) }));
+const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
+const YEARS = Array.from({ length: 4 }, (_, i) => new Date().getFullYear() - 1 + i);
 
-const categoryOptions = [
-  { value: 'maintenance', label: 'Maintenance' },
-  { value: 'repair', label: 'Repair' },
-  { value: 'cleaning', label: 'Cleaning' },
-  { value: 'electricity', label: 'Electricity (Building)' },
-  { value: 'water', label: 'Water' },
-  { value: 'security', label: 'Security' },
-  { value: 'staff', label: 'Staff / Labor' },
-  { value: 'legal', label: 'Legal' },
-  { value: 'tax', label: 'Tax / Govt' },
-  { value: 'purchase', label: 'Purchase' },
-  { value: 'other', label: 'Other' },
-];
+const categoryOptions = EXPENSE_CATEGORIES.map((c) => ({ value: c.value, label: c.label }));
 
 const treatmentOptions = [
   { value: 'brotherMaintained', label: 'Maintained by a brother (not split)' },
@@ -33,11 +23,7 @@ const treatmentOptions = [
   { value: 'custom', label: 'Custom split' },
 ];
 
-const paidByOptions = [
-  { value: 'jahid', label: 'Jahid' },
-  { value: 'jony', label: 'Jony' },
-  { value: 'joint', label: 'Joint / Both' },
-];
+const paidByOptions = EXPENSE_PAYERS.map((p) => ({ value: p.value, label: p.label }));
 
 function ExpenseForm({
   defaultValues,
@@ -50,69 +36,84 @@ function ExpenseForm({
   onSubmit: (data: any) => void;
   loading: boolean;
 }) {
+  const { t } = useI18n();
+  const tr = (opts: { value: string; label: string }[]) => opts.map((o) => ({ ...o, label: t(o.label) }));
   const [form, setForm] = useState({
-    title: '',
-    category: 'maintenance',
-    paidBy: 'jahid',
-    expenseTreatment: 'brotherMaintained',
-    paidByJahid: '',
-    paidByJony: '',
-    relatedUnitId: '',
-    notes: '',
-    ...defaultValues,
+    title: defaultValues?.title ?? '',
+    category: defaultValues?.category ?? 'maintenance',
+    paidBy: defaultValues?.paidBy ?? 'jahid',
+    expenseTreatment: defaultValues?.expenseTreatment ?? 'brotherMaintained',
+    shareJahid: defaultValues?.customShare?.jahid != null ? String(defaultValues.customShare.jahid) : '',
+    shareJony: defaultValues?.customShare?.jony != null ? String(defaultValues.customShare.jony) : '',
+    // When editing, the unit comes back populated as an object.
+    relatedUnitId: defaultValues?.relatedUnitId?._id ?? defaultValues?.relatedUnitId ?? '',
+    notes: defaultValues?.notes ?? '',
     amount: defaultValues?.amount != null ? String(defaultValues.amount) : '',
     expenseDate: defaultValues?.expenseDate
       ? String(defaultValues.expenseDate).split('T')[0]
-      : new Date().toISOString().split('T')[0],
+      : todayInDhaka(),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.title || !form.amount) { toast.error('Title and amount are required'); return; }
+    if (!form.title || !form.amount) { toast.error(t('Title and amount are required')); return; }
+    const amount = Number(form.amount);
+    const isCustom = form.expenseTreatment === 'custom';
+    if (isCustom && Math.abs(Number(form.shareJahid) + Number(form.shareJony) - amount) > 0.01) {
+      toast.error(t("Jahid's and Jony's shares must add up to the amount"));
+      return;
+    }
     onSubmit({
-      ...form,
-      amount: Number(form.amount),
-      paidByJahid: form.expenseTreatment === 'custom' ? Number(form.paidByJahid) : undefined,
-      paidByJony: form.expenseTreatment === 'custom' ? Number(form.paidByJony) : undefined,
-      relatedUnitId: form.relatedUnitId || undefined,
-      month: new Date(form.expenseDate).getMonth() + 1,
-      year: new Date(form.expenseDate).getFullYear(),
+      title: form.title,
+      category: form.category,
+      paidBy: form.paidBy,
+      expenseTreatment: form.expenseTreatment,
+      amount,
+      expenseDate: form.expenseDate,
+      customShare: isCustom
+        ? { jahid: Number(form.shareJahid) || 0, jony: Number(form.shareJony) || 0 }
+        : undefined,
+      relatedUnitId: form.relatedUnitId || null,
+      notes: form.notes,
+      // Read straight from "YYYY-MM-DD" so the browser's timezone can't shift it.
+      month: Number(form.expenseDate.slice(5, 7)),
+      year: Number(form.expenseDate.slice(0, 4)),
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <Input label="Title" required placeholder="e.g. Roof repair" value={form.title}
+      <Input label={t('Title')} required placeholder={t('e.g. Roof repair')} value={form.title}
         onChange={(e) => setForm({ ...form, title: e.target.value })} />
       <div className="grid grid-cols-2 gap-3">
-        <Input label="Amount (৳)" type="number" required leftAddon="৳" value={form.amount}
+        <Input label={t('Amount (৳)')} type="number" required leftAddon="৳" value={form.amount}
           onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-        <Input label="Date" type="date" required value={form.expenseDate}
+        <Input label={t('Date')} type="date" required value={form.expenseDate}
           onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} />
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Select label="Category" options={categoryOptions} value={form.category}
+        <Select label={t('Category')} options={tr(categoryOptions)} value={form.category}
           onChange={(e) => setForm({ ...form, category: e.target.value })} />
-        <Select label="Paid By" options={paidByOptions} value={form.paidBy}
+        <Select label={t('Paid By')} options={tr(paidByOptions)} value={form.paidBy}
           onChange={(e) => setForm({ ...form, paidBy: e.target.value })} />
       </div>
-      <Select label="Expense Treatment" options={treatmentOptions} value={form.expenseTreatment}
+      <Select label={t('Who bears the cost')} options={tr(treatmentOptions)} value={form.expenseTreatment}
         onChange={(e) => setForm({ ...form, expenseTreatment: e.target.value })} />
       {form.expenseTreatment === 'custom' && (
         <div className="grid grid-cols-2 gap-3">
-          <Input label="Jahid's Share (৳)" type="number" leftAddon="৳" value={form.paidByJahid}
-            onChange={(e) => setForm({ ...form, paidByJahid: e.target.value })} />
-          <Input label="Jony's Share (৳)" type="number" leftAddon="৳" value={form.paidByJony}
-            onChange={(e) => setForm({ ...form, paidByJony: e.target.value })} />
+          <Input label={t("Jahid's Share (৳)")} type="number" leftAddon="৳" value={form.shareJahid}
+            onChange={(e) => setForm({ ...form, shareJahid: e.target.value })} />
+          <Input label={t("Jony's Share (৳)")} type="number" leftAddon="৳" value={form.shareJony}
+            onChange={(e) => setForm({ ...form, shareJony: e.target.value })} />
         </div>
       )}
-      <Select label="Related Unit (Optional)"
-        options={[{ value: '', label: 'None' }, ...units.map((u) => ({ value: u._id, label: u.unitName }))]}
+      <Select label={t('Related Unit (Optional)')}
+        options={[{ value: '', label: t('None') }, ...units.map((u) => ({ value: u._id, label: u.unitName }))]}
         value={form.relatedUnitId}
         onChange={(e) => setForm({ ...form, relatedUnitId: e.target.value })} />
-      <Textarea label="Notes" rows={2} value={form.notes}
+      <Textarea label={t('Notes')} rows={2} value={form.notes}
         onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-      <Button type="submit" loading={loading} className="w-full">Save Expense</Button>
+      <Button type="submit" loading={loading} className="w-full">{t('Save Expense')}</Button>
     </form>
   );
 }
@@ -122,7 +123,6 @@ export default function ExpensesClient({
   units,
   defaultMonth,
   defaultYear,
-  currentUser,
 }: {
   initialExpenses: any[];
   units: any[];
@@ -138,6 +138,7 @@ export default function ExpensesClient({
   const [archiveTarget, setArchiveTarget] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const { t, f } = useI18n();
 
   const fetchExpenses = async (m = month, y = year) => {
     const params = new URLSearchParams({ month: String(m), year: String(y) });
@@ -156,8 +157,8 @@ export default function ExpensesClient({
       const url = editingExpense ? `/api/expenses/${editingExpense._id}` : '/api/expenses';
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error);
-      toast.success(editingExpense ? 'Expense updated' : 'Expense recorded');
+      if (!res.ok) throw new Error(t(result.error));
+      toast.success(t(editingExpense ? 'Expense updated' : 'Expense recorded'));
       setShowModal(false);
       setEditingExpense(null);
       await fetchExpenses();
@@ -177,8 +178,8 @@ export default function ExpensesClient({
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
       });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error);
-      toast.success(action === 'archive' ? 'Expense archived' : 'Expense restored');
+      if (!res.ok) throw new Error(t(result.error));
+      toast.success(t(action === 'archive' ? 'Expense archived' : 'Expense restored'));
       setArchiveTarget(null);
       await fetchExpenses();
     } catch (e: any) {
@@ -193,9 +194,9 @@ export default function ExpensesClient({
   const jonyTotal = expenses.filter(e => e.status !== 'archived' && e.paidBy === 'jony').reduce((s, e) => s + e.amount, 0);
 
   const treatmentLabel: Record<string, string> = {
-    brotherMaintained: 'Brother',
+    brotherMaintained: 'One brother',
     shared50_50: '50/50',
-    custom: 'Custom',
+    custom: 'Custom'
   };
 
   return (
@@ -204,55 +205,55 @@ export default function ExpensesClient({
         <div className="flex gap-2">
           <select value={month} onChange={(e) => { setMonth(Number(e.target.value)); fetchExpenses(Number(e.target.value), year); }}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-            {MONTHS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            {MONTHS.map((m) => <option key={m} value={m}>{f.month(m)}</option>)}
           </select>
           <select value={year} onChange={(e) => { setYear(Number(e.target.value)); fetchExpenses(month, Number(e.target.value)); }}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-            {YEARS.map((y) => <option key={y.value} value={y.value}>{y.label}</option>)}
+            {YEARS.map((y) => <option key={y} value={y}>{f.digits(y)}</option>)}
           </select>
         </div>
         <div className="flex gap-2 sm:ml-auto">
           <button onClick={() => setShowArchived(!showArchived)}
             className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${showArchived ? 'bg-slate-800 text-white' : 'border-slate-200 text-slate-600 bg-white hover:bg-slate-50'}`}>
-            {showArchived ? 'Hide Archived' : 'Show Archived'}
+            {t(showArchived ? 'Hide Archived' : 'Show Archived')}
           </button>
           <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => { setEditingExpense(null); setShowModal(true); }}>
-            Add Expense
+            {t('Add Expense')}
           </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
-          <p className="text-xl font-bold text-slate-800">{formatBDT(totalAmount)}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Total Expenses</p>
+          <p className="text-xl font-bold text-slate-800">{f.bdt(totalAmount)}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Total Expenses')}</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
-          <p className="text-xl font-bold text-indigo-600">{formatBDT(jahidTotal)}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Paid by Jahid</p>
+          <p className="text-xl font-bold text-indigo-600">{f.bdt(jahidTotal)}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Paid by Jahid')}</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
-          <p className="text-xl font-bold text-emerald-600">{formatBDT(jonyTotal)}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Paid by Jony</p>
+          <p className="text-xl font-bold text-emerald-600">{f.bdt(jonyTotal)}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Paid by Jony')}</p>
         </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200">
         {expenses.length === 0 ? (
-          <EmptyState title="No expenses this month" description="Record building expenses and maintenance costs"
-            action={<Button onClick={() => setShowModal(true)} leftIcon={<Plus className="w-4 h-4" />}>Add Expense</Button>} />
+          <EmptyState title={t('No expenses this month')} description={t('Record building expenses and maintenance costs')}
+            action={<Button onClick={() => setShowModal(true)} leftIcon={<Plus className="w-4 h-4" />}>{t('Add Expense')}</Button>} />
         ) : (
           <Table>
             <TableHead>
               <tr>
-                <Th>Title</Th>
-                <Th>Category</Th>
-                <Th>Date</Th>
-                <Th>Amount</Th>
-                <Th>Paid By</Th>
-                <Th>Treatment</Th>
-                <Th>Unit</Th>
-                <Th className="text-right">Actions</Th>
+                <Th>{t('Title')}</Th>
+                <Th>{t('Category')}</Th>
+                <Th>{t('Date')}</Th>
+                <Th>{t('Amount')}</Th>
+                <Th>{t('Paid By')}</Th>
+                <Th>{t('Split')}</Th>
+                <Th>{t('Unit')}</Th>
+                <Th className="text-right">{t('Actions')}</Th>
               </tr>
             </TableHead>
             <TableBody>
@@ -262,11 +263,11 @@ export default function ExpensesClient({
                     <p className="font-medium text-slate-800">{expense.title}</p>
                     {expense.notes && <p className="text-xs text-slate-400 mt-0.5 truncate max-w-32">{expense.notes}</p>}
                   </Td>
-                  <Td className="capitalize text-sm">{expense.category}</Td>
-                  <Td className="text-sm">{formatDate(expense.expenseDate)}</Td>
-                  <Td className="font-semibold text-orange-600">{formatBDT(expense.amount)}</Td>
-                  <Td className="capitalize text-sm">{expense.paidBy}</Td>
-                  <Td><span className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600">{treatmentLabel[expense.expenseTreatment] || expense.expenseTreatment}</span></Td>
+                  <Td className="text-sm">{t(formatExpenseCategory(expense.category))}</Td>
+                  <Td className="text-sm">{f.date(expense.expenseDate)}</Td>
+                  <Td className="font-semibold text-orange-600">{f.bdt(expense.amount)}</Td>
+                  <Td className="text-sm">{t(expense.paidBy === 'joint' ? 'Joint / Both' : expense.paidBy === 'jony' ? 'Jony' : 'Jahid')}</Td>
+                  <Td><span className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600">{t(treatmentLabel[expense.expenseTreatment] || expense.expenseTreatment)}</span></Td>
                   <Td className="text-xs text-slate-500">{expense.relatedUnitId?.unitName || '—'}</Td>
                   <Td>
                     <div className="flex items-center justify-end gap-1">
@@ -290,16 +291,16 @@ export default function ExpensesClient({
       </div>
 
       <Modal isOpen={showModal} onClose={() => { setShowModal(false); setEditingExpense(null); }}
-        title={editingExpense ? 'Edit Expense' : 'Add Expense'} size="lg">
+        title={t(editingExpense ? 'Edit Expense' : 'Add Expense')} size="lg">
         <ExpenseForm defaultValues={editingExpense} units={units} onSubmit={handleSubmit} loading={loading} />
       </Modal>
 
       <ConfirmDialog isOpen={!!archiveTarget} onClose={() => setArchiveTarget(null)} onConfirm={handleArchive}
-        title={archiveTarget?.status === 'archived' ? 'Restore Expense' : 'Archive Expense'}
+        title={t(archiveTarget?.status === 'archived' ? 'Restore Expense' : 'Archive Expense')}
         message={archiveTarget?.status === 'archived'
-          ? `Restore "${archiveTarget?.title}"?`
-          : `Archive "${archiveTarget?.title}"? It will be excluded from totals.`}
-        confirmLabel={archiveTarget?.status === 'archived' ? 'Restore' : 'Archive'}
+          ? t('Restore "{name}"?', { name: archiveTarget?.title })
+          : t('Archive "{name}"? It will be excluded from totals.', { name: archiveTarget?.title })}
+        confirmLabel={t(archiveTarget?.status === 'archived' ? 'Restore' : 'Archive')}
         confirmVariant={archiveTarget?.status === 'archived' ? 'primary' : 'danger'}
         loading={loading} />
     </div>

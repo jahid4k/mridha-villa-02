@@ -4,10 +4,12 @@ import Expense from '@/models/Expense';
 import Unit from '@/models/Unit';
 import { getCurrentMonthYear } from '@/lib/formatters';
 import ExpensesClient from '@/components/expenses/ExpensesClient';
+import { getI18n } from '@/lib/i18n/server';
 
 export default async function ExpensesPage() {
   const session = await auth();
   await connectDB();
+  const { t } = await getI18n();
   const { month, year } = getCurrentMonthYear();
 
   const [expenses, units] = await Promise.all([
@@ -21,8 +23,8 @@ export default async function ExpensesPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800">Expenses</h1>
-        <p className="text-slate-500 text-sm mt-1">Track building maintenance and operational expenses</p>
+        <h1 className="text-2xl font-bold text-slate-800">{t('Expenses')}</h1>
+        <p className="text-slate-500 text-sm mt-1">{t('Track building maintenance and operational expenses')}</p>
       </div>
       <ExpensesClient
         initialExpenses={JSON.parse(JSON.stringify(expenses))}

@@ -2,10 +2,12 @@ import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/db';
 import Setting from '@/models/Setting';
 import SettingsClient from '@/components/settings/SettingsClient';
+import { getI18n } from '@/lib/i18n/server';
 
 export default async function SettingsPage() {
   const session = await auth();
   await connectDB();
+  const { t } = await getI18n();
 
   const settings = await Setting.find().lean();
   const map: Record<string, any> = {};
@@ -14,8 +16,8 @@ export default async function SettingsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800">Settings</h1>
-        <p className="text-slate-500 text-sm mt-1">Configure building and system preferences</p>
+        <h1 className="text-2xl font-bold text-slate-800">{t('Settings')}</h1>
+        <p className="text-slate-500 text-sm mt-1">{t('Configure building and system preferences')}</p>
       </div>
       <SettingsClient
         initialSettings={map}

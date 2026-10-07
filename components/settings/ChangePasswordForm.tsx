@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { useI18n } from "@/components/providers/LanguageProvider";
+import { capitalize } from "@/lib/formatters";
 
 export default function ChangePasswordForm({ username }: { username: string }) {
   const [newPassword, setNewPassword] = useState("");
@@ -11,22 +13,23 @@ export default function ChangePasswordForm({ username }: { username: string }) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
+  const { t } = useI18n();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!newPassword || !confirmPassword) {
-      toast.error("Please fill in both fields");
+      toast.error(t("Please fill in both fields"));
       return;
     }
 
     if (newPassword.length < 6) {
-      toast.error("Password must be at least 6 characters");
+      toast.error(t("Password must be at least 6 characters"));
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match");
+      toast.error(t("Passwords do not match"));
       return;
     }
 
@@ -47,11 +50,11 @@ export default function ChangePasswordForm({ username }: { username: string }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      toast.success("Password changed successfully");
+      toast.success(t("Password changed successfully"));
       setNewPassword("");
       setConfirmPassword("");
     } catch (e: any) {
-      toast.error(e.message || "Failed to change password");
+      toast.error(t(e.message || "Failed to change password"));
     } finally {
       setLoading(false);
     }
@@ -68,14 +71,14 @@ export default function ChangePasswordForm({ username }: { username: string }) {
         {/* New Password */}
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
-            New Password <span className="text-red-500">*</span>
+            {t('New Password')} <span className="text-red-500">*</span>
           </label>
           <div className="relative">
             <input
               type={showNew ? "text" : "password"}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Enter new password"
+              placeholder={t('Enter new password')}
               className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             />
             <button
@@ -90,20 +93,20 @@ export default function ChangePasswordForm({ username }: { username: string }) {
               )}
             </button>
           </div>
-          <p className="text-xs text-slate-400 mt-1">Minimum 6 characters</p>
+          <p className="text-xs text-slate-400 mt-1">{t('Minimum 6 characters')}</p>
         </div>
 
         {/* Confirm Password */}
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
-            Confirm New Password <span className="text-red-500">*</span>
+            {t('Confirm New Password')} <span className="text-red-500">*</span>
           </label>
           <div className="relative">
             <input
               type={showConfirm ? "text" : "password"}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Re-enter new password"
+              placeholder={t('Re-enter new password')}
               className={`w-full px-3 py-2 pr-10 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
                 passwordsMismatch
                   ? "border-red-300 bg-red-50"
@@ -125,10 +128,10 @@ export default function ChangePasswordForm({ username }: { username: string }) {
             </button>
           </div>
           {passwordsMismatch && (
-            <p className="text-xs text-red-600 mt-1">Passwords do not match</p>
+            <p className="text-xs text-red-600 mt-1">{t('Passwords do not match')}</p>
           )}
           {passwordsMatch && (
-            <p className="text-xs text-green-600 mt-1">✓ Passwords match</p>
+            <p className="text-xs text-green-600 mt-1">✓ {t('Passwords match')}</p>
           )}
         </div>
 
@@ -137,7 +140,7 @@ export default function ChangePasswordForm({ username }: { username: string }) {
           disabled={loading || !newPassword || !confirmPassword}
           className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white font-medium rounded-lg text-sm transition-colors"
         >
-          {loading ? "Changing..." : "Change Password"}
+          {t(loading ? "Changing..." : "Change Password")}
         </button>
       </form>
 
@@ -158,21 +161,19 @@ export default function ChangePasswordForm({ username }: { username: string }) {
             </div>
 
             <h3 className="text-lg font-bold text-slate-800 text-center mb-2">
-              Remember Your Password
+              {t('Remember Your Password')}
             </h3>
 
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-5">
               <p className="text-sm text-amber-800 text-center leading-relaxed">
-                <strong>Warning:</strong> Make sure you remember this new
-                password. If you forget it, you will{" "}
-                <strong>not be able to log in</strong> and will need help from a
-                technical person to reset it.
+                <strong>{t('Warning:')}</strong>{" "}
+                {t('Make sure you remember this new password. If you forget it, you will not be able to log in and will need help from a technical person to reset it.')}
               </p>
             </div>
 
             <p className="text-xs text-slate-500 text-center mb-5">
-              Changing password for:{" "}
-              <strong className="capitalize">{username}</strong>
+              {t('Changing password for:')}{" "}
+              <strong>{t(capitalize(username))}</strong>
             </p>
 
             <div className="flex gap-3">
@@ -180,13 +181,13 @@ export default function ChangePasswordForm({ username }: { username: string }) {
                 onClick={() => setShowWarning(false)}
                 className="flex-1 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
               >
-                Cancel
+                {t('Cancel')}
               </button>
               <button
                 onClick={handleConfirm}
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
               >
-                Yes, Change It
+                {t('Yes, Change It')}
               </button>
             </div>
           </div>

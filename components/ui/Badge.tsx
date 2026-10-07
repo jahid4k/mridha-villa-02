@@ -1,4 +1,7 @@
+'use client';
+
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/components/providers/LanguageProvider';
 
 interface BadgeProps {
   children: React.ReactNode;
@@ -31,6 +34,7 @@ export function Badge({ children, variant = 'default', className }: BadgeProps) 
 }
 
 export function StatusBadge({ status }: { status: string }) {
+  const { t } = useI18n();
   const config: Record<string, { label: string; variant: BadgeProps['variant'] }> = {
     paid: { label: 'Paid', variant: 'success' },
     partial: { label: 'Partial', variant: 'warning' },
@@ -48,13 +52,14 @@ export function StatusBadge({ status }: { status: string }) {
   };
 
   const c = config[status] || { label: status, variant: 'default' as const };
-  return <Badge variant={c.variant}>{c.label}</Badge>;
+  return <Badge variant={c.variant}>{t(c.label)}</Badge>;
 }
 
 export function CollectorBadge({ collector }: { collector: string }) {
+  const { t } = useI18n();
   return (
     <Badge variant={collector === 'jahid' ? 'purple' : 'success'}>
-      {collector === 'jahid' ? 'Jahid' : 'Jony'}
+      {t(collector === 'jahid' ? 'Jahid' : 'Jony')}
     </Badge>
   );
 }

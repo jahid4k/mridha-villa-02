@@ -1,6 +1,8 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export type LeaseStatus = 'active' | 'ended' | 'archived';
+/** monthly: deduct advancePerMonth from each month's rent. final: keep until move-out. */
+export type AdvanceMode = 'monthly' | 'final';
 
 export interface ILease extends Document {
   tenantId: mongoose.Types.ObjectId;
@@ -11,10 +13,19 @@ export interface ILease extends Document {
   endDate?: Date;
   rentDueDay: number;
   securityDepositAmount: number;
+  /** Deed advance still held (অগ্রিম); used according to advanceMode. */
   advanceBalance: number;
+  advanceMode: AdvanceMode;
+  advancePerMonth: number;
+  /** Money paid beyond what was owed; used up against the next months' rent automatically. */
+  creditBalance: number;
+  /** Last month (YYYYMM) whose rent/gas has been charged automatically. */
+  chargedThrough?: number;
   collector: string;
   status: LeaseStatus;
   agreementDocuments: any[];
+  /** The Bangla deed as saved from the New agreement form (DeedInput), for printing again. */
+  deed?: Record<string, any>;
   notes?: string;
   createdBy: string;
   updatedBy: string;
@@ -53,9 +64,14 @@ const LeaseSchema = new Schema<ILease>(
     monthlyRentAmount: { type: Number, required: true, min: 0 },
     startDate: { type: Date, required: true },
     endDate: { type: Date },
-    rentDueDay: { type: Number, default: 5, min: 1, max: 31 },
+    // Deed clause ৩.২: rent is due between the 1st and the 7th.
+    rentDueDay: { type: Number, default: 7, min: 1, max: 31 },
     securityDepositAmount: { type: Number, default: 0, min: 0 },
     advanceBalance: { type: Number, default: 0, min: 0 },
+    advanceMode: { type: String, enum: ['monthly', 'final'], default: 'final' },
+    advancePerMonth: { type: Number, default: 0, min: 0 },
+    creditBalance: { type: Number, default: 0, min: 0 },
+    chargedThrough: { type: Number },
     collector: {
       type: String,
       enum: ['jahid', 'jony'],
@@ -67,6 +83,7 @@ const LeaseSchema = new Schema<ILease>(
       default: 'active',
     },
     agreementDocuments: { type: mongoose.Schema.Types.Mixed, default: [] },
+    deed: { type: mongoose.Schema.Types.Mixed },
     notes: { type: String },
     createdBy: { type: String, required: true },
     updatedBy: { type: String, required: true },

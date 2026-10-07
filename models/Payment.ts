@@ -1,12 +1,25 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export type PaymentMethod = 'cash' | 'bank' | 'bkash' | 'nagad' | 'rocket' | 'other';
-export type PaymentType = 'rent' | 'advance' | 'due' | 'adjustment' | 'other';
+export type PaymentType = 'rent' | 'advance' | 'due' | 'adjustment' | 'other' | 'collection';
+export type ChargeKind = 'rent' | 'electricity' | 'gas';
+
+/** Which charge a payment paid, and how much of it. */
+export interface IPaymentAllocation {
+  kind: ChargeKind;
+  refId: mongoose.Types.ObjectId;
+  month: number;
+  year: number;
+  amount: number;
+}
 
 export interface IPayment extends Document {
   tenantId: mongoose.Types.ObjectId;
   leaseId: mongoose.Types.ObjectId;
   monthlyRentRecordId?: mongoose.Types.ObjectId;
+  allocations: IPaymentAllocation[];
+  /** Part of the amount that paid nothing and was kept as credit on the lease. */
+  creditAdded: number;
   amount: number;
   paymentDate: Date;
   paymentMethod: PaymentMethod;
@@ -53,6 +66,17 @@ const PaymentSchema = new Schema<IPayment>(
       type: Schema.Types.ObjectId,
       ref: 'RentRecord',
     },
+    allocations: {
+      type: [new Schema({
+        kind: { type: String, enum: ['rent', 'electricity', 'gas'], required: true },
+        refId: { type: Schema.Types.ObjectId, required: true },
+        month: { type: Number, required: true },
+        year: { type: Number, required: true },
+        amount: { type: Number, required: true, min: 0 },
+      }, { _id: false })],
+      default: [],
+    },
+    creditAdded: { type: Number, default: 0, min: 0 },
     amount: { type: Number, required: true, min: 0.01 },
     paymentDate: { type: Date, required: true },
     paymentMethod: {
@@ -67,7 +91,7 @@ const PaymentSchema = new Schema<IPayment>(
     },
     paymentType: {
       type: String,
-      enum: ['rent', 'advance', 'due', 'adjustment', 'other'],
+      enum: ['rent', 'advance', 'due', 'adjustment', 'other', 'collection'],
       default: 'rent',
     },
     notes: { type: String },

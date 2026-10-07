@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/db';
 import Lease from '@/models/Lease';
-import Unit from '@/models/Unit';
-import Tenant from '@/models/Tenant';
-import { createAuditLog } from '@/lib/audit';
+import { createLease, LeaseError } from '@/lib/leases';
+import { translateError } from '@/lib/i18n';
+import { getLang } from '@/lib/i18n/server';
 import { createLeaseSchema } from '@/lib/validators';
 
 export async function GET(req: NextRequest) {
@@ -46,56 +46,19 @@ export async function POST(req: NextRequest) {
 
   const username = (session.user as any).username;
 
-  // Check for conflicting active leases on these units
-  const conflictingLeases = await Lease.find({
-    unitIds: { $in: parsed.data.unitIds },
-    status: 'active',
-  }).populate('tenantId', 'name');
-
-  // Build the lease
-  const lease = await Lease.create({
-    ...parsed.data,
-    startDate: new Date(parsed.data.startDate),
-    endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : undefined,
-    createdBy: username,
-    updatedBy: username,
-  });
-
-  // Update units to occupied
-  await Unit.updateMany(
-    { _id: { $in: parsed.data.unitIds } },
-    {
-      status: 'occupied',
-      currentLeaseId: lease._id,
-      currentTenantId: parsed.data.tenantId,
-      updatedBy: username,
+  let lease;
+  try {
+    lease = await createLease(parsed.data, username);
+  } catch (e) {
+    if (e instanceof LeaseError) {
+      return NextResponse.json({ error: translateError(await getLang(), e.message, e.vars) }, { status: e.status });
     }
-  );
-
-  // Update tenant's active leases
-  await Tenant.findByIdAndUpdate(parsed.data.tenantId, {
-    $addToSet: { activeLeaseIds: lease._id },
-    status: 'active',
-    updatedBy: username,
-  });
-
-  await createAuditLog({
-    entityType: 'lease',
-    entityId: lease._id.toString(),
-    action: 'create',
-    performedBy: username,
-    newData: parsed.data,
-    note: `Created lease for tenant`,
-  });
+    throw e;
+  }
 
   const populatedLease = await Lease.findById(lease._id)
     .populate('tenantId', 'name phone')
     .populate('unitIds', 'unitName unitNumber');
 
-  return NextResponse.json({
-    lease: populatedLease,
-    conflictWarning: conflictingLeases.length > 0
-      ? `Warning: Some units already have active leases`
-      : null,
-  }, { status: 201 });
+  return NextResponse.json({ lease: populatedLease }, { status: 201 });
 }

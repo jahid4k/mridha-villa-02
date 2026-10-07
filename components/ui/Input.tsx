@@ -1,5 +1,25 @@
 import { cn } from '@/lib/utils';
+import { fromBnDigits } from '@/lib/i18n';
 import { forwardRef } from 'react';
+
+const numberText = (s: string) => fromBnDigits(s).replace(/।/g, '.').replace(/[^\d.-]/g, '');
+
+/**
+ * Number boxes are text boxes underneath, because Chrome's type="number"
+ * silently drops Bengali digits typed with Avro. Rewrites the box's text to
+ * plain digits (০-৯ -> 0-9, Avro's "।" -> "."), drops anything else, keeps the
+ * cursor in place, and returns the cleaned text.
+ */
+export function toNumberText(el: HTMLInputElement): string {
+  const raw = el.value;
+  const clean = numberText(raw);
+  if (clean !== raw) {
+    const caret = numberText(raw.slice(0, el.selectionStart ?? raw.length)).length;
+    el.value = clean;
+    el.setSelectionRange(caret, caret);
+  }
+  return clean;
+}
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -9,8 +29,9 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, hint, leftAddon, className, id, ...props }, ref) => {
+  ({ label, error, hint, leftAddon, className, id, type, inputMode, onChange, ...props }, ref) => {
     const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+    const isNumber = type === 'number';
 
     return (
       <div className="w-full">
@@ -30,6 +51,16 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             id={inputId}
             {...props}
+            type={isNumber ? 'text' : type}
+            inputMode={isNumber ? (inputMode ?? 'decimal') : inputMode}
+            onChange={
+              isNumber
+                ? (e) => {
+                    toNumberText(e.target);
+                    onChange?.(e);
+                  }
+                : onChange
+            }
             className={cn(
               'w-full border rounded-lg text-slate-800 placeholder-slate-400 text-sm transition-all',
               'focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent',

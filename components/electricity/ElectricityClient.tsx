@@ -2,166 +2,291 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Zap, Settings } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Zap, Settings, Pencil, Archive } from 'lucide-react';
+import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { Input, Select, Textarea } from '@/components/ui/Input';
+import { Input, Textarea, toNumberText } from '@/components/ui/Input';
 import { StatusBadge } from '@/components/ui/Badge';
 import { Table, TableHead, TableBody, Th, Td, TableRow, EmptyState } from '@/components/ui/Table';
-import { formatBDT, getMonthName } from '@/lib/formatters';
+import { todayInDhaka } from '@/lib/formatters';
+import { useI18n } from '@/components/providers/LanguageProvider';
 import { calculateElectricityBill } from '@/lib/calculations';
+import { cn } from '@/lib/utils';
 
-const MONTHS = Array.from({ length: 12 }, (_, i) => ({
-  value: String(i + 1),
-  label: getMonthName(i + 1),
-}));
-const YEARS = Array.from({ length: 4 }, (_, i) => ({
-  value: String(new Date().getFullYear() - 1 + i),
-  label: String(new Date().getFullYear() - 1 + i),
-}));
+const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
+const YEARS = Array.from({ length: 4 }, (_, i) => new Date().getFullYear() - 1 + i);
 
-export default function ElectricityClient({
-  initialBills,
-  currentRate,
-  leases,
-  units,
-  defaultMonth,
-  defaultYear,
-}: {
-  initialBills: any[];
-  currentRate: number;
-  leases: any[];
-  units: any[];
-  defaultMonth: number;
-  defaultYear: number;
-}) {
-  const [bills, setBills] = useState(initialBills);
-  const [month, setMonth] = useState(defaultMonth);
-  const [year, setYear] = useState(defaultYear);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showPayModal, setShowPayModal] = useState<any>(null);
+const today = todayInDhaka;
+
+const cellInputCls =
+  'w-24 border rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+interface Sheet {
+  month: number;
+  year: number;
+  rate: { rate: number; source: 'set' | 'carried' | 'default'; month?: number; year?: number } | null;
+  rows: any[];
+}
+
+type Draft = { previousReading: string; currentReading: string };
+
+// Unbilled rows start with last month's closing reading as the previous reading.
+function draftsFor(rows: any[], keep: Record<string, Draft> = {}): Record<string, Draft> {
+  const drafts: Record<string, Draft> = {};
+  for (const row of rows) {
+    if (row.bill) continue;
+    drafts[row.key] = keep[row.key] ?? {
+      previousReading: row.lastReading ? String(row.lastReading.reading) : '',
+      currentReading: '',
+    };
+  }
+  return drafts;
+}
+
+function evaluate(draft: Draft | undefined, rate: number | null) {
+  if (!draft || draft.previousReading === '' || draft.currentReading === '') return { state: 'empty' as const };
+  const previousReading = Number(draft.previousReading);
+  const currentReading = Number(draft.currentReading);
+  if (!Number.isFinite(previousReading) || !Number.isFinite(currentReading) || previousReading < 0) {
+    return { state: 'invalid' as const, message: 'Enter valid numbers' };
+  }
+  if (currentReading < previousReading) {
+    return { state: 'invalid' as const, message: 'Lower than previous' };
+  }
+  const calc = calculateElectricityBill({ previousReading, currentReading, globalRatePerUnit: rate ?? 0 });
+  return { state: 'ready' as const, previousReading, currentReading, calc };
+}
+
+export default function ElectricityClient({ initialSheet }: { initialSheet: Sheet }) {
+  const [sheet, setSheet] = useState<Sheet>(initialSheet);
+  const [drafts, setDrafts] = useState(() => draftsFor(initialSheet.rows));
+  const [month, setMonth] = useState(initialSheet.month);
+  const [year, setYear] = useState(initialSheet.year);
+  const [saving, setSaving] = useState(false);
+
+  const [payBill, setPayBill] = useState<any>(null);
+  const [payForm, setPayForm] = useState({ amount: '', paymentDate: today() });
+
+  const [editBill, setEditBill] = useState<any>(null);
+  const [editForm, setEditForm] = useState({ previousReading: '', currentReading: '', manualAdjustment: '0', notes: '' });
+
   const [showRateModal, setShowRateModal] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [rate, setRate] = useState(currentRate);
+  const [rateForm, setRateForm] = useState({ rate: '', applyToExisting: true });
+  const { t, f } = useI18n();
+  const monthLabel = (m: number, y: number) => f.shortMonthYear(m, y);
 
-  const [form, setForm] = useState({
-    leaseId: '',
-    unitId: '',
-    tenantId: '',
-    previousReading: '',
-    currentReading: '',
-    manualAdjustment: '0',
-    notes: '',
-  });
+  const rate = sheet.rate?.rate ?? null;
+  const billedRows = sheet.rows.filter((r) => r.bill);
+  const pendingRows = sheet.rows.filter((r) => !r.bill);
+  const readyRows = pendingRows
+    .map((row) => ({ row, result: evaluate(drafts[row.key], rate) }))
+    .filter((x) => x.result.state === 'ready');
+  const repriceable = billedRows.filter((r) => r.bill.status === 'unpaid' || r.bill.status === 'partial');
 
-  const [payForm, setPayForm] = useState({
-    paidAmount: '',
-    paymentDate: new Date().toISOString().split('T')[0],
-  });
+  const totalBilled = billedRows.reduce((s, r) => s + r.bill.finalAmount, 0);
+  const totalPaid = billedRows.reduce((s, r) => s + r.bill.paidAmount, 0);
+  const totalDue = billedRows.reduce((s, r) => s + r.bill.dueAmount, 0);
 
-  const [newRate, setNewRate] = useState(String(currentRate));
+  const loadSheet = async (m: number, y: number, keepDrafts: boolean) => {
+    const res = await fetch(`/api/electricity/sheet?month=${m}&year=${y}`);
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(t(data.error || 'Could not load bills'));
+      return;
+    }
+    setSheet(data);
+    setDrafts((prev) => draftsFor(data.rows, keepDrafts ? prev : {}));
+  };
 
-  const fetchBills = async (m = month, y = year) => {
-    const res = await fetch(`/api/electricity?month=${m}&year=${y}`);
-    if (res.ok) {
+  const changeMonth = (m: number, y: number) => {
+    setMonth(m);
+    setYear(y);
+    loadSheet(m, y, false);
+  };
+
+  const setDraft = (key: string, field: keyof Draft, value: string) =>
+    setDrafts((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+
+  const handleCreateAll = async () => {
+    if (rate === null) {
+      toast.error(t('Set an electricity rate first'));
+      return;
+    }
+    setSaving(true);
+    try {
+      const entries = readyRows.map(({ row, result }) => ({
+        leaseId: row.leaseId,
+        unitId: row.unit._id,
+        previousReading: result.state === 'ready' ? result.previousReading : 0,
+        currentReading: result.state === 'ready' ? result.currentReading : 0,
+      }));
+      const res = await fetch('/api/electricity/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month, year, entries }),
+      });
       const data = await res.json();
-      setBills(data.bills);
+      if (data.created > 0) toast.success(t('Created {count} bill(s)', { count: data.created }));
+      for (const err of data.errors ?? []) {
+        const unitName = sheet.rows.find((r) => r.unit?._id === err.unitId)?.unit?.unitName ?? 'Unit';
+        toast.error(`${unitName}: ${t(err.error)}`);
+      }
+      if (!res.ok && !data.errors) toast.error(t(data.error || 'Could not create bills'));
+      await loadSheet(month, year, true);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const preview = form.previousReading && form.currentReading
-    ? calculateElectricityBill({
-        previousReading: Number(form.previousReading),
-        currentReading: Number(form.currentReading),
-        globalRatePerUnit: rate,
-        manualAdjustment: Number(form.manualAdjustment) || 0,
-      })
-    : null;
-
-  const handleAdd = async () => {
-    if (!form.leaseId || !form.unitId || !form.previousReading || !form.currentReading) {
-      toast.error('Fill all required fields');
-      return;
-    }
-    setLoading(true);
-    try {
-      const selectedLease = leases.find((l) => l._id === form.leaseId);
-      const res = await fetch('/api/electricity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: selectedLease?.tenantId?._id,
-          leaseId: form.leaseId,
-          unitId: form.unitId,
-          month,
-          year,
-          previousReading: Number(form.previousReading),
-          currentReading: Number(form.currentReading),
-          globalRatePerUnit: rate,
-          manualAdjustment: Number(form.manualAdjustment) || 0,
-          notes: form.notes,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success('Electricity bill created');
-      setShowAddModal(false);
-      setForm({ leaseId: '', unitId: '', tenantId: '', previousReading: '', currentReading: '', manualAdjustment: '0', notes: '' });
-      await fetchBills();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setLoading(false);
-    }
+  const openPay = (bill: any) => {
+    setPayForm({ amount: String(bill.dueAmount), paymentDate: today() });
+    setPayBill(bill);
   };
 
   const handlePay = async () => {
-    if (!showPayModal || !payForm.paidAmount) { toast.error('Enter amount'); return; }
-    setLoading(true);
+    if (!payBill || !(Number(payForm.amount) > 0)) {
+      toast.error(t('Enter the amount received'));
+      return;
+    }
+    setSaving(true);
     try {
-      const res = await fetch(`/api/electricity/${showPayModal._id}`, {
+      const res = await fetch(`/api/electricity/${payBill._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paidAmount: Number(payForm.paidAmount),
-          paymentDate: payForm.paymentDate,
-        }),
+        body: JSON.stringify({ amount: Number(payForm.amount), paymentDate: payForm.paymentDate }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success('Payment recorded');
-      setShowPayModal(null);
-      await fetchBills();
+      if (!res.ok) throw new Error(t(data.error));
+      toast.success(t('Payment recorded'));
+      setPayBill(null);
+      await loadSheet(month, year, true);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
+  const openEdit = (bill: any) => {
+    setEditForm({
+      previousReading: String(bill.previousReading),
+      currentReading: String(bill.currentReading),
+      manualAdjustment: String(bill.manualAdjustment ?? 0),
+      notes: bill.notes ?? '',
+    });
+    setEditBill(bill);
+  };
+
+  const editPreview = editBill
+    ? evaluate(editForm, editBill.globalRatePerUnit)
+    : null;
+  const editFinal = editPreview?.state === 'ready'
+    ? calculateElectricityBill({
+        previousReading: editPreview.previousReading,
+        currentReading: editPreview.currentReading,
+        globalRatePerUnit: editBill.globalRatePerUnit,
+        manualAdjustment: Number(editForm.manualAdjustment) || 0,
+      })
+    : null;
+
+  const handleEdit = async () => {
+    if (!editBill || editPreview?.state !== 'ready') {
+      toast.error(t(editPreview?.state === 'invalid' ? editPreview.message : 'Enter both readings'));
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/electricity/${editBill._id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit',
+          previousReading: editPreview.previousReading,
+          currentReading: editPreview.currentReading,
+          manualAdjustment: Number(editForm.manualAdjustment) || 0,
+          notes: editForm.notes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(t(data.error));
+      toast.success(t('Bill corrected'));
+      setEditBill(null);
+      await loadSheet(month, year, true);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleArchive = async (row: any) => {
+    const bill = row.bill;
+    const paidNote = bill.paidAmount > 0 ? ` ${t('{amount} has already been paid on it.', { amount: f.bdt(bill.paidAmount) })}` : '';
+    if (!confirm(`${t('Archive the {unit} bill for {month}?', { unit: row.unit?.unitName, month: monthLabel(month, year) })}${paidNote} ${t('You can then enter the reading again.')}`)) {
+      return;
+    }
+    const res = await fetch(`/api/electricity/${bill._id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'archive' }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(t(data.error));
+      return;
+    }
+    toast.success(t('Bill archived'));
+    await loadSheet(month, year, true);
+  };
+
+  const openRateModal = () => {
+    setRateForm({ rate: rate !== null ? String(rate) : '', applyToExisting: true });
+    setShowRateModal(true);
+  };
+
   const handleSetRate = async () => {
-    setLoading(true);
+    const value = Number(rateForm.rate);
+    if (rateForm.rate === '' || !Number.isFinite(value) || value < 0) {
+      toast.error(t('Enter a valid rate'));
+      return;
+    }
+    setSaving(true);
     try {
       const res = await fetch('/api/electricity/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month, year, globalRatePerUnit: Number(newRate) }),
+        body: JSON.stringify({
+          month,
+          year,
+          globalRatePerUnit: value,
+          applyToExisting: repriceable.length > 0 && rateForm.applyToExisting,
+        }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setRate(Number(newRate));
-      toast.success(`Rate set to ৳${newRate}/unit for ${getMonthName(month)} ${year}`);
+      if (!res.ok) throw new Error(t(data.error));
+      let msg = t('Rate set to {rate}/unit for {month}', { rate: f.bdt(value), month: monthLabel(month, year) });
+      if (data.repriced) msg += `; ${t('re-priced {count} bill(s)', { count: data.repriced })}`;
+      toast.success(msg);
+      if (data.skipped) {
+        toast.warning(t('{count} bill(s) kept their old rate: already paid more than the new amount', { count: data.skipped }));
+      }
       setShowRateModal(false);
+      await loadSheet(month, year, true);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const totalDue = bills.reduce((s, b) => s + b.dueAmount, 0);
-  const totalBilled = bills.reduce((s, b) => s + b.finalAmount, 0);
+  const rateCaption = !sheet.rate
+    ? t('No rate set')
+    : sheet.rate.source === 'set'
+      ? t('Set for {month}', { month: monthLabel(month, year) })
+      : sheet.rate.source === 'carried'
+        ? t('Carried from {month}', { month: monthLabel(sheet.rate.month!, sheet.rate.year!) })
+        : t('Default from Settings');
 
   return (
     <div className="space-y-4">
@@ -169,229 +294,322 @@ export default function ElectricityClient({
         <div className="flex gap-2">
           <select
             value={month}
-            onChange={(e) => { setMonth(Number(e.target.value)); fetchBills(Number(e.target.value), year); }}
+            onChange={(e) => changeMonth(Number(e.target.value), year)}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
           >
-            {MONTHS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            {MONTHS.map((m) => <option key={m} value={m}>{f.month(m)}</option>)}
           </select>
           <select
             value={year}
-            onChange={(e) => { setYear(Number(e.target.value)); fetchBills(month, Number(e.target.value)); }}
+            onChange={(e) => changeMonth(month, Number(e.target.value))}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
           >
-            {YEARS.map((y) => <option key={y.value} value={y.value}>{y.label}</option>)}
+            {YEARS.map((y) => <option key={y} value={y}>{f.digits(y)}</option>)}
           </select>
         </div>
-        <div className="flex gap-2 sm:ml-auto">
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<Settings className="w-3.5 h-3.5" />}
-            onClick={() => setShowRateModal(true)}
+        <div className="flex gap-2 items-center sm:ml-auto">
+          <button
+            onClick={openRateModal}
+            className={cn(
+              'flex items-center gap-2 border rounded-lg px-3 py-1.5 text-left hover:bg-slate-50',
+              sheet.rate ? 'border-slate-300' : 'border-red-300 bg-red-50',
+            )}
           >
-            Rate: ৳{rate}/unit
-          </Button>
-          <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setShowAddModal(true)}>
-            Add Bill
+            <Settings className="w-3.5 h-3.5 text-slate-500" />
+            <span>
+              <span className="block text-sm font-medium text-slate-800">
+                {sheet.rate ? t('{rate}/unit', { rate: f.bdt(sheet.rate.rate) }) : t('Set rate')}
+              </span>
+              <span className={cn('block text-[11px]', sheet.rate ? 'text-slate-400' : 'text-red-600')}>
+                {rateCaption}
+              </span>
+            </span>
+          </button>
+          <Button
+            leftIcon={<Zap className="w-4 h-4" />}
+            onClick={handleCreateAll}
+            loading={saving}
+            disabled={readyRows.length === 0 || rate === null}
+          >
+            {readyRows.length ? t('Create {count} bill(s)', { count: readyRows.length }) : t('Create bills')}
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Card className="p-4 text-center">
-          <p className="text-xl font-bold text-slate-800">{formatBDT(totalBilled)}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Total Billed</p>
+          <p className="text-xl font-bold text-slate-800">{f.bdt(totalBilled)}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Total Billed')}</p>
         </Card>
         <Card className="p-4 text-center">
-          <p className="text-xl font-bold text-green-600">{formatBDT(totalBilled - totalDue)}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Collected</p>
+          <p className="text-xl font-bold text-green-600">{f.bdt(totalPaid)}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Collected')}</p>
         </Card>
         <Card className="p-4 text-center">
-          <p className="text-xl font-bold text-red-500">{formatBDT(totalDue)}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Outstanding</p>
+          <p className="text-xl font-bold text-red-500">{f.bdt(totalDue)}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Outstanding')}</p>
+        </Card>
+        <Card className="p-4 text-center">
+          <p className="text-xl font-bold text-amber-600">{f.digits(pendingRows.length)}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Readings Pending')}</p>
         </Card>
       </div>
 
       <Card>
-        {bills.length === 0 ? (
+        {sheet.rows.length === 0 ? (
           <EmptyState
-            title="No electricity bills this month"
-            description="Add sub-meter readings to generate electricity bills"
-            action={<Button onClick={() => setShowAddModal(true)} leftIcon={<Zap className="w-4 h-4" />}>Add Bill</Button>}
+            title={t('No metered units')}
+            description={t('Units with an electricity sub-meter on an active lease appear here automatically')}
           />
         ) : (
           <Table>
             <TableHead>
               <tr>
-                <Th>Tenant</Th>
-                <Th>Unit</Th>
-                <Th>Reading</Th>
-                <Th>Units Used</Th>
-                <Th>Amount</Th>
-                <Th>Paid</Th>
-                <Th>Due</Th>
-                <Th>Status</Th>
-                <Th>Actions</Th>
+                <Th>{t('Unit')}</Th>
+                <Th>{t('Tenant')}</Th>
+                <Th>{t('Previous')}</Th>
+                <Th>{t('Current')}</Th>
+                <Th>{t('Units used')}</Th>
+                <Th>{t('Amount')}</Th>
+                <Th>{t('Paid / Due')}</Th>
+                <Th>{t('Status')}</Th>
+                <Th>{t('Actions')}</Th>
               </tr>
             </TableHead>
             <TableBody>
-              {bills.map((bill) => (
-                <TableRow key={bill._id}>
+              {sheet.rows.map((row) => {
+                const bill = row.bill;
+                const unitCell = (
                   <Td>
-                    <p className="font-medium">{bill.tenantId?.name}</p>
-                    <p className="text-xs text-slate-400">{bill.tenantId?.phone}</p>
+                    <p className="font-medium">{row.unit?.unitName}</p>
+                    <p className="text-xs text-slate-400">{row.unit?.electricityMeterNumber || t('No meter no.')}</p>
                   </Td>
+                );
+                const tenantCell = (
                   <Td>
-                    <p className="font-medium">{bill.unitId?.unitName}</p>
-                    <p className="text-xs text-slate-400">{bill.unitId?.electricityMeterNumber}</p>
+                    <p className="font-medium">{row.tenant?.name}</p>
+                    <p className="text-xs text-slate-400">{row.tenant?.phone}</p>
                   </Td>
-                  <Td className="text-xs">
-                    <span className="text-slate-500">{bill.previousReading}</span>
-                    <span className="mx-1 text-slate-300">→</span>
-                    <span className="font-medium">{bill.currentReading}</span>
-                  </Td>
-                  <Td className="font-medium">{bill.consumedUnits} units</Td>
-                  <Td className="font-semibold">{formatBDT(bill.finalAmount)}</Td>
-                  <Td className="text-green-600">{formatBDT(bill.paidAmount)}</Td>
-                  <Td className={bill.dueAmount > 0 ? 'text-red-500 font-medium' : 'text-slate-400'}>
-                    {formatBDT(bill.dueAmount)}
-                  </Td>
-                  <Td><StatusBadge status={bill.status} /></Td>
-                  <Td>
-                    {bill.status !== 'paid' && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setPayForm({ paidAmount: String(bill.dueAmount), paymentDate: new Date().toISOString().split('T')[0] });
-                          setShowPayModal(bill);
-                        }}
-                      >
-                        Pay
-                      </Button>
-                    )}
-                  </Td>
-                </TableRow>
-              ))}
+                );
+
+                if (bill) {
+                  return (
+                    <TableRow key={row.key}>
+                      {unitCell}
+                      {tenantCell}
+                      <Td className="text-slate-500">{f.num(bill.previousReading)}</Td>
+                      <Td className="font-medium">{f.num(bill.currentReading)}</Td>
+                      <Td>{f.num(bill.consumedUnits)}</Td>
+                      <Td>
+                        <p className="font-semibold">{f.bdt(bill.finalAmount)}</p>
+                        {bill.manualAdjustment !== 0 && (
+                          <p className="text-[11px] text-slate-400">
+                            {t('adj')} {bill.manualAdjustment > 0 ? '+' : ''}{f.bdt(bill.manualAdjustment)}
+                          </p>
+                        )}
+                      </Td>
+                      <Td>
+                        <p className="text-green-600">{f.bdt(bill.paidAmount)}</p>
+                        <p className={bill.dueAmount > 0 ? 'text-red-500 text-xs font-medium' : 'text-slate-400 text-xs'}>
+                          {t('{amount} due', { amount: f.bdt(bill.dueAmount) })}
+                        </p>
+                      </Td>
+                      <Td><StatusBadge status={bill.status} /></Td>
+                      <Td>
+                        <div className="flex items-center gap-1">
+                          {bill.dueAmount > 0 && (
+                            <Button size="sm" variant="outline" onClick={() => openPay(bill)}>{t('Pay')}</Button>
+                          )}
+                          <button
+                            onClick={() => openEdit(bill)}
+                            className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100"
+                            aria-label={t('Edit bill')}
+                            title={t('Correct readings')}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleArchive(row)}
+                            className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100"
+                            aria-label={t('Archive bill')}
+                            title={t('Archive bill')}
+                          >
+                            <Archive className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </Td>
+                    </TableRow>
+                  );
+                }
+
+                const draft = drafts[row.key];
+                const result = evaluate(draft, rate);
+                const last = row.lastReading;
+                const prevDiffers = last && draft?.previousReading !== '' && Number(draft?.previousReading) !== last.reading;
+                return (
+                  <TableRow key={row.key} className="bg-amber-50/30">
+                    {unitCell}
+                    {tenantCell}
+                    <Td>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={draft?.previousReading ?? ''}
+                        onChange={(e) => setDraft(row.key, 'previousReading', toNumberText(e.target))}
+                        // Skip on Tab when pre-filled, so Tab jumps between current readings.
+                        tabIndex={last ? -1 : undefined}
+                        className={cn(cellInputCls, prevDiffers ? 'border-amber-400' : 'border-slate-300')}
+                        aria-label={`${row.unit?.unitName} ${t('previous reading')}`}
+                      />
+                      <p className={cn('text-[11px] mt-0.5', prevDiffers ? 'text-amber-600' : 'text-slate-400')}>
+                        {last
+                          ? t('{month} ended at {reading}', { month: monthLabel(last.month, last.year), reading: f.num(last.reading) })
+                          : t('First bill: enter it')}
+                      </p>
+                    </Td>
+                    <Td>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={draft?.currentReading ?? ''}
+                        onChange={(e) => setDraft(row.key, 'currentReading', toNumberText(e.target))}
+                        className={cn(cellInputCls, result.state === 'invalid' ? 'border-red-400' : 'border-slate-300')}
+                        aria-label={`${row.unit?.unitName} ${t('current reading')}`}
+                      />
+                      {result.state === 'invalid' && (
+                        <p className="text-[11px] mt-0.5 text-red-600">{t(result.message)}</p>
+                      )}
+                    </Td>
+                    <Td>{result.state === 'ready' ? f.num(result.calc.consumedUnits) : '—'}</Td>
+                    <Td className="font-semibold text-indigo-700">
+                      {result.state === 'ready' && rate !== null ? f.bdt(result.calc.finalAmount) : '—'}
+                    </Td>
+                    <Td className="text-slate-300">—</Td>
+                    <Td>
+                      <span className="text-xs text-amber-700">
+                        {result.state === 'ready' ? t('Ready') : t('Not billed')}
+                      </span>
+                    </Td>
+                    <Td>{null}</Td>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
       </Card>
 
-      {/* Add Bill Modal */}
-      <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add Electricity Bill" size="md"
-        footer={
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setShowAddModal(false)}>Cancel</Button>
-            <Button onClick={handleAdd} loading={loading}>Create Bill</Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <Select
-            label="Lease"
-            required
-            options={leases.map((l) => ({
-              value: l._id,
-              label: `${l.tenantId?.name} — ${l.unitIds?.map((u: any) => u.unitName).join(', ')}`,
-            }))}
-            placeholder="Select lease"
-            value={form.leaseId}
-            onChange={(e) => setForm({ ...form, leaseId: e.target.value })}
-          />
-          <Select
-            label="Unit (with sub-meter)"
-            required
-            options={units.map((u) => ({
-              value: u._id,
-              label: `${u.unitName} — Meter: ${u.electricityMeterNumber || 'No meter no.'}`,
-            }))}
-            placeholder="Select unit"
-            value={form.unitId}
-            onChange={(e) => setForm({ ...form, unitId: e.target.value })}
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Previous Reading"
-              type="number"
-              required
-              value={form.previousReading}
-              onChange={(e) => setForm({ ...form, previousReading: e.target.value })}
-            />
-            <Input
-              label="Current Reading"
-              type="number"
-              required
-              value={form.currentReading}
-              onChange={(e) => setForm({ ...form, currentReading: e.target.value })}
-            />
-          </div>
-          <Input
-            label="Manual Adjustment (৳)"
-            type="number"
-            value={form.manualAdjustment}
-            onChange={(e) => setForm({ ...form, manualAdjustment: e.target.value })}
-            hint="Positive to add, negative to deduct"
-          />
-          {preview && (
-            <div className="bg-indigo-50 rounded-lg p-3 text-xs space-y-1">
-              <p><span className="text-slate-600">Units consumed:</span> <strong>{preview.consumedUnits}</strong></p>
-              <p><span className="text-slate-600">Rate:</span> ৳{rate}/unit</p>
-              <p><span className="text-slate-600">Calculated:</span> <strong>{formatBDT(preview.calculatedAmount)}</strong></p>
-              {preview.manualAdjustment !== 0 && <p><span className="text-slate-600">Adjustment:</span> {formatBDT(preview.manualAdjustment)}</p>}
-              <p className="text-indigo-700 font-semibold"><span>Final Amount:</span> {formatBDT(preview.finalAmount)}</p>
-            </div>
-          )}
-          <Textarea label="Notes" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-        </div>
-      </Modal>
-
       {/* Pay Modal */}
-      <Modal isOpen={!!showPayModal} onClose={() => setShowPayModal(null)} title="Record Payment" size="sm"
+      <Modal isOpen={!!payBill} onClose={() => setPayBill(null)} title={t('Record Payment')} size="sm"
         footer={
           <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setShowPayModal(null)}>Cancel</Button>
-            <Button onClick={handlePay} loading={loading} variant="success">Save</Button>
+            <Button variant="outline" onClick={() => setPayBill(null)}>{t('Cancel')}</Button>
+            <Button onClick={handlePay} loading={saving} variant="success">{t('Save')}</Button>
           </div>
         }
       >
         <div className="space-y-3">
-          {showPayModal && (
-            <div className="bg-slate-50 rounded p-3 text-xs">
-              <p><strong>Bill Amount:</strong> {formatBDT(showPayModal.finalAmount)}</p>
-              <p><strong>Already Paid:</strong> {formatBDT(showPayModal.paidAmount)}</p>
-              <p className="text-red-600"><strong>Due:</strong> {formatBDT(showPayModal.dueAmount)}</p>
+          {payBill && (
+            <div className="bg-slate-50 rounded p-3 text-xs space-y-0.5">
+              <p><strong>{t('Bill Amount:')}</strong> {f.bdt(payBill.finalAmount)}</p>
+              <p><strong>{t('Already Paid:')}</strong> {f.bdt(payBill.paidAmount)}</p>
+              <p className="text-red-600"><strong>{t('Due:')}</strong> {f.bdt(payBill.dueAmount)}</p>
+              {payBill.payments?.length > 0 && (
+                <div className="pt-2 mt-2 border-t border-slate-200 space-y-0.5">
+                  {payBill.payments.map((p: any, i: number) => (
+                    <p key={i} className="text-slate-500">
+                      {f.date(p.paidAt)}: {f.bdt(p.amount)} ({t(p.receivedBy === 'jony' ? 'Jony' : 'Jahid')})
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-          <Input label="Amount Paid (৳)" type="number" leftAddon="৳"
-            value={payForm.paidAmount}
-            onChange={(e) => setPayForm({ ...payForm, paidAmount: e.target.value })}
+          <Input label={t('Amount Received Now (৳)')} type="number" leftAddon="৳"
+            value={payForm.amount}
+            onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+            hint={t("Added to what's already been paid")}
           />
-          <Input label="Payment Date" type="date"
+          <Input label={t('Payment Date')} type="date"
             value={payForm.paymentDate}
             onChange={(e) => setPayForm({ ...payForm, paymentDate: e.target.value })}
           />
         </div>
       </Modal>
 
-      {/* Rate Modal */}
-      <Modal isOpen={showRateModal} onClose={() => setShowRateModal(false)} title="Set Electricity Rate" size="sm"
+      {/* Edit Modal */}
+      <Modal isOpen={!!editBill} onClose={() => setEditBill(null)} title={t('Correct Electricity Bill')} size="md"
         footer={
           <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setShowRateModal(false)}>Cancel</Button>
-            <Button onClick={handleSetRate} loading={loading}>Save Rate</Button>
+            <Button variant="outline" onClick={() => setEditBill(null)}>{t('Cancel')}</Button>
+            <Button onClick={handleEdit} loading={saving}>{t('Save')}</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Input label={t('Previous Reading')} type="number" required
+              value={editForm.previousReading}
+              onChange={(e) => setEditForm({ ...editForm, previousReading: e.target.value })}
+            />
+            <Input label={t('Current Reading')} type="number" required
+              value={editForm.currentReading}
+              onChange={(e) => setEditForm({ ...editForm, currentReading: e.target.value })}
+              error={editPreview?.state === 'invalid' ? t(editPreview.message) : undefined}
+            />
+          </div>
+          <Input label={t('Manual Adjustment (৳)')} type="number"
+            value={editForm.manualAdjustment}
+            onChange={(e) => setEditForm({ ...editForm, manualAdjustment: e.target.value })}
+            hint={t('Positive to add, negative to deduct')}
+          />
+          {editBill && editFinal && (
+            <div className="bg-indigo-50 rounded-lg p-3 text-xs space-y-1">
+              <p><span className="text-slate-600">{t('Units consumed:')}</span> <strong>{f.num(editFinal.consumedUnits)}</strong></p>
+              <p><span className="text-slate-600">{t('Rate:')}</span> {t('{rate}/unit', { rate: f.bdt(editBill.globalRatePerUnit) })}</p>
+              <p className="text-indigo-700 font-semibold">{t('Final Amount:')} {f.bdt(editFinal.finalAmount)}</p>
+              {editBill.paidAmount > 0 && (
+                <p className="text-slate-600">{t('Already paid:')} {f.bdt(editBill.paidAmount)}</p>
+              )}
+            </div>
+          )}
+          <Textarea label={t('Notes')} rows={2} value={editForm.notes}
+            onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+          />
+        </div>
+      </Modal>
+
+      {/* Rate Modal */}
+      <Modal isOpen={showRateModal} onClose={() => setShowRateModal(false)} title={t('Set Electricity Rate')} size="sm"
+        footer={
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => setShowRateModal(false)}>{t('Cancel')}</Button>
+            <Button onClick={handleSetRate} loading={saving}>{t('Save Rate')}</Button>
           </div>
         }
       >
         <div className="space-y-3">
           <Input
-            label={`Rate for ${getMonthName(month)} ${year}`}
+            label={t('Rate for {month}', { month: f.monthYear(month, year) })}
             type="number"
             leftAddon="৳"
-            value={newRate}
-            onChange={(e) => setNewRate(e.target.value)}
-            hint="BDT per unit of electricity consumed"
+            value={rateForm.rate}
+            onChange={(e) => setRateForm({ ...rateForm, rate: e.target.value })}
+            hint={t('BDT per unit. Later months use this rate until you set a new one.')}
           />
+          {repriceable.length > 0 && (
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={rateForm.applyToExisting}
+                onChange={(e) => setRateForm({ ...rateForm, applyToExisting: e.target.checked })}
+              />
+              <span>
+                {t('Also re-price {count} bill(s) for this month that are not fully paid', { count: repriceable.length })}
+              </span>
+            </label>
+          )}
         </div>
       </Modal>
     </div>

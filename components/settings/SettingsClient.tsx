@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import ChangePasswordForm from "./ChangePasswordForm";
 import { Save, Database, Building2, Zap, KeyRound } from "lucide-react";
+import { useI18n } from "@/components/providers/LanguageProvider";
+import { capitalize } from "@/lib/formatters";
 
 interface SettingField {
   key: string;
@@ -40,12 +42,6 @@ const SETTINGS_GROUPS: {
         type: "number",
         hint: "Day of month (1–28)",
       },
-      {
-        key: "lateFeePercentage",
-        label: "Late Fee (%)",
-        type: "number",
-        hint: "Applied after due date",
-      },
       { key: "currency", label: "Currency Symbol", type: "text" },
     ],
   },
@@ -74,6 +70,7 @@ export default function SettingsClient({
     useState<Record<string, any>>(initialSettings);
   const [saving, setSaving] = useState<string | null>(null);
   const [seedLoading, setSeedLoading] = useState(false);
+  const { t } = useI18n();
 
   const handleSave = async (key: string) => {
     setSaving(key);
@@ -84,10 +81,10 @@ export default function SettingsClient({
         body: JSON.stringify({ key, value: settings[key] }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Setting saved");
+      if (!res.ok) throw new Error(t(data.error));
+      toast.success(t("Setting saved"));
     } catch (e: any) {
-      toast.error(e.message || "Failed to save");
+      toast.error(e.message || t("Failed to save"));
     } finally {
       setSaving(null);
     }
@@ -97,13 +94,13 @@ export default function SettingsClient({
     for (const field of fields) {
       await handleSave(field.key);
     }
-    toast.success("All settings saved");
+    toast.success(t("All settings saved"));
   };
 
   const handleSeed = async () => {
     if (
       !confirm(
-        "This will seed the database with default users and units. Continue?",
+        t("This will seed the database with default users and units. Continue?"),
       )
     )
       return;
@@ -111,10 +108,10 @@ export default function SettingsClient({
     try {
       const res = await fetch("/api/seed", { method: "POST" });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Seed complete: ${data.results?.length} items`);
+      if (!res.ok) throw new Error(t(data.error));
+      toast.success(t("Seed complete: {count} items", { count: data.results?.length ?? 0 }));
     } catch (e: any) {
-      toast.error(e.message || "Seed failed");
+      toast.error(e.message || t("Seed failed"));
     } finally {
       setSeedLoading(false);
     }
@@ -127,7 +124,7 @@ export default function SettingsClient({
           <CardHeader>
             <div className="flex items-center gap-2">
               {group.icon}
-              <CardTitle>{group.title} Settings</CardTitle>
+              <CardTitle>{t(`${group.title} settings`)}</CardTitle>
             </div>
           </CardHeader>
           <CardContent>
@@ -138,10 +135,10 @@ export default function SettingsClient({
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-slate-700">
-                          {field.label}
+                          {t(field.label)}
                         </p>
                         {field.hint && (
-                          <p className="text-xs text-slate-500">{field.hint}</p>
+                          <p className="text-xs text-slate-500">{t(field.hint)}</p>
                         )}
                       </div>
                       <input
@@ -158,9 +155,9 @@ export default function SettingsClient({
                     </div>
                   ) : (
                     <Input
-                      label={field.label}
+                      label={t(field.label)}
                       type={field.type === "number" ? "number" : "text"}
-                      hint={field.hint}
+                      hint={field.hint ? t(field.hint) : undefined}
                       value={settings[field.key] ?? ""}
                       onChange={(e) =>
                         setSettings({
@@ -182,7 +179,7 @@ export default function SettingsClient({
                 loading={saving !== null}
                 onClick={() => handleSaveGroup(group.fields)}
               >
-                Save {group.title} Settings
+                {t('Save')}
               </Button>
             </div>
           </CardContent>
@@ -192,14 +189,12 @@ export default function SettingsClient({
       {/* Danger Zone */}
       <Card className="border-red-200">
         <CardHeader>
-          <CardTitle className="text-red-600">Developer Tools</CardTitle>
+          <CardTitle className="text-red-600">{t('Developer Tools')}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
             <p className="text-sm text-slate-600">
-              Seed the database with default users (jahid, jony) and units (7
-              shops + 5 rooms). Safe to run multiple times — existing records
-              are skipped.
+              {t('Seed the database with default users (jahid, jony) and units (7 shops + 5 rooms). Safe to run multiple times — existing records are skipped.')}
             </p>
             <Button
               variant="danger"
@@ -207,7 +202,7 @@ export default function SettingsClient({
               onClick={handleSeed}
               loading={seedLoading}
             >
-              Seed Database
+              {t('Seed Database')}
             </Button>
           </div>
         </CardContent>
@@ -216,12 +211,12 @@ export default function SettingsClient({
       {/* Session Info */}
       <Card>
         <CardHeader>
-          <CardTitle>Session</CardTitle>
+          <CardTitle>{t('Session')}</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-slate-600">
-            Logged in as:{" "}
-            <span className="font-semibold capitalize">{currentUser}</span>
+            {t('Logged in as:')}{" "}
+            <span className="font-semibold">{t(capitalize(currentUser))}</span>
           </p>
         </CardContent>
       </Card>
@@ -231,7 +226,7 @@ export default function SettingsClient({
         <CardHeader>
           <div className="flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-slate-500" />
-            <CardTitle>Change Password</CardTitle>
+            <CardTitle>{t('Change Password')}</CardTitle>
           </div>
         </CardHeader>
         <CardContent>

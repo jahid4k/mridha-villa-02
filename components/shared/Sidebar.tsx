@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/components/providers/LanguageProvider';
 import {
   LayoutDashboard, Building2, Users, FileText, CircleDollarSign,
-  Zap, Flame, Receipt, BarChart3, ClipboardList, Settings, X,
+  Zap, Flame, Receipt, BarChart3, ClipboardList, Settings, X, FileSignature,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -13,6 +14,7 @@ const NAV_ITEMS = [
   { href: '/units', label: 'Units', icon: Building2 },
   { href: '/tenants', label: 'Tenants', icon: Users },
   { href: '/leases', label: 'Leases', icon: FileText },
+  { href: '/deeds/new', label: 'New agreement', icon: FileSignature },
   { href: '/rent', label: 'Rent', icon: CircleDollarSign },
   { href: '/electricity', label: 'Electricity', icon: Zap },
   { href: '/gas', label: 'Gas', icon: Flame },
@@ -29,6 +31,7 @@ interface SidebarProps {
 
 function NavLinks({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
+  const { t } = useI18n();
   return (
     <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
@@ -40,7 +43,7 @@ function NavLinks({ onClose }: { onClose?: () => void }) {
               isActive ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
             )}>
             <Icon className="w-4 h-4 flex-shrink-0" />
-            {label}
+            {t(label)}
           </Link>
         );
       })}
@@ -49,6 +52,7 @@ function NavLinks({ onClose }: { onClose?: () => void }) {
 }
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {
+  const { t, f } = useI18n();
   return (
     <div className="flex flex-col h-full bg-white">
       <div className="flex items-center justify-between px-4 h-16 border-b border-slate-100 flex-shrink-0">
@@ -58,7 +62,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
           </div>
           <div>
             <p className="text-sm font-bold text-slate-800 leading-none">Mridha Villa 2</p>
-            <p className="text-xs text-slate-400 leading-none mt-0.5">Property Management</p>
+            <p className="text-xs text-slate-400 leading-none mt-0.5">{t('Property Management')}</p>
           </div>
         </div>
         {onClose && (
@@ -69,7 +73,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       </div>
       <NavLinks onClose={onClose} />
       <div className="px-4 py-3 border-t border-slate-100 flex-shrink-0">
-        <p className="text-xs text-slate-400 text-center">Mridha Villa 2 &copy; 2024</p>
+        <p className="text-xs text-slate-400 text-center">Mridha Villa 2 &copy; {f.digits(2024)}</p>
       </div>
     </div>
   );

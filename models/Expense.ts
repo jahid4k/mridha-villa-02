@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { EXPENSE_CATEGORY_VALUES, EXPENSE_PAYER_VALUES, type ExpenseCategory } from '@/lib/expenseOptions';
 
-export type ExpenseCategory = 'water' | 'repair' | 'maintenance' | 'cleaner' | 'security' | 'tax' | 'common_electricity' | 'legal' | 'renovation' | 'other';
+export type { ExpenseCategory };
 export type ExpenseTreatment = 'brotherMaintained' | 'shared50_50' | 'assignedToJahid' | 'assignedToJony' | 'custom';
 
 export interface IExpense extends Document {
@@ -45,13 +46,13 @@ const ExpenseSchema = new Schema<IExpense>(
     title: { type: String, required: true, trim: true },
     category: {
       type: String,
-      enum: ['water', 'repair', 'maintenance', 'cleaner', 'security', 'tax', 'common_electricity', 'legal', 'renovation', 'other'],
+      enum: EXPENSE_CATEGORY_VALUES,
       required: true,
     },
     amount: { type: Number, required: true, min: 0 },
     paidBy: {
       type: String,
-      enum: ['jahid', 'jony'],
+      enum: EXPENSE_PAYER_VALUES,
       required: true,
     },
     expenseDate: { type: Date, required: true },

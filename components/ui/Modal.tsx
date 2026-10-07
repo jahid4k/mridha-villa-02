@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from './Button';
+import { useI18n } from '@/components/providers/LanguageProvider';
 
 interface ModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ const sizes = {
 };
 
 export function Modal({ isOpen, onClose, title, children, size = 'md', footer }: ModalProps) {
+  const { t } = useI18n();
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -52,6 +54,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', footer }:
           <h2 className="text-base font-semibold text-slate-800">{title}</h2>
           <button
             onClick={onClose}
+            aria-label={t('Close')}
             className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
           >
             <X className="w-4 h-4" />
@@ -91,10 +94,11 @@ export function ConfirmDialog({
   onConfirm,
   title,
   message,
-  confirmLabel = 'Confirm',
+  confirmLabel,
   confirmVariant = 'danger',
   loading,
 }: ConfirmDialogProps) {
+  const { t } = useI18n();
   return (
     <Modal
       isOpen={isOpen}
@@ -104,10 +108,10 @@ export function ConfirmDialog({
       footer={
         <div className="flex gap-2 justify-end">
           <Button variant="outline" onClick={onClose} disabled={loading}>
-            Cancel
+            {t('Cancel')}
           </Button>
           <Button variant={confirmVariant} onClick={onConfirm} loading={loading}>
-            {confirmLabel}
+            {confirmLabel ?? t('Confirm')}
           </Button>
         </div>
       }

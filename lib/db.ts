@@ -1,5 +1,27 @@
 import mongoose from 'mongoose';
 
+// Side-effect imports: register every Mongoose model up front so that any
+// route/page calling connectDB() can safely .populate() across models,
+// regardless of which model files that specific route happens to import.
+// Next.js/Turbopack bundles each route's module graph separately, so a
+// model that's only reached indirectly (e.g. via .populate('tenantId'))
+// may never get registered otherwise, causing a MissingSchemaError.
+// These imports have no named bindings, so they survive "organize imports"
+// / unused-import cleanup in editors and linters.
+import '@/models/User';
+import '@/models/Tenant';
+import '@/models/Unit';
+import '@/models/Lease';
+import '@/models/RentRecord';
+import '@/models/Payment';
+import '@/models/Expense';
+import '@/models/ElectricityBill';
+import '@/models/ElectricitySetting';
+import '@/models/GasBill';
+import '@/models/Setting';
+import '@/models/AuditLog';
+import '@/models/Counter';
+
 const MONGODB_URI = process.env.MONGODB_URI!;
 
 if (!MONGODB_URI) {

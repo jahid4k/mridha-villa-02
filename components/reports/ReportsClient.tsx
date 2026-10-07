@@ -6,7 +6,8 @@ import {
   ResponsiveContainer, Legend, PieChart, Pie, Cell, LineChart, Line,
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
-import { formatBDT, getMonthName } from '@/lib/formatters';
+import { capitalize, formatExpenseCategory } from '@/lib/formatters';
+import { useI18n } from '@/components/providers/LanguageProvider';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -19,7 +20,7 @@ function buildMonthlyData(rentRecords: any[], expenses: any[]) {
     const collected = monthRecords.reduce((s, r) => s + r.collectedAmount, 0);
     const expenseTotal = monthExpenses.reduce((s, e) => s + e.amount, 0);
     return {
-      month: getMonthName(m).slice(0, 3),
+      month: m,
       Expected: expected,
       Collected: collected,
       Due: expected - collected,
@@ -68,8 +69,6 @@ function buildStatusData(rentRecords: any[]) {
   return Object.entries(counts).map(([name, value]) => ({ name, value }));
 }
 
-const formatY = (v: any) => `৳${(Number(v) / 1000).toFixed(0)}k`;
-
 export default function ReportsClient({
   rentRecords,
   expenses,
@@ -83,7 +82,9 @@ export default function ReportsClient({
   defaultYear: number;
   currentUser: string;
 }) {
-  const [year, setYear] = useState(defaultYear);
+  const { t, f } = useI18n();
+  const formatY = (v: any) => `৳${f.digits((Number(v) / 1000).toFixed(0))}${t('k')}`;
+  const money = (v: any) => f.bdt(Number(v));
   const YEARS = Array.from({ length: 5 }, (_, i) => defaultYear - 2 + i);
 
   const [reportYear, setReportYear] = useState(defaultYear);
@@ -121,7 +122,7 @@ export default function ReportsClient({
     <div className="space-y-6">
       {/* Year picker */}
       <div className="flex items-center gap-3">
-        <p className="text-sm font-medium text-slate-700">Year:</p>
+        <p className="text-sm font-medium text-slate-700">{t('Year:')}</p>
         <div className="flex gap-1">
           {YEARS.map((y) => (
             <button
@@ -131,7 +132,7 @@ export default function ReportsClient({
                 reportYear === y ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
               }`}
             >
-              {y}
+              {f.digits(y)}
             </button>
           ))}
         </div>
@@ -140,48 +141,48 @@ export default function ReportsClient({
       {/* Annual KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Total Expected', value: formatBDT(totals.expected), color: 'text-slate-800' },
-          { label: 'Total Collected', value: formatBDT(totals.collected), color: 'text-green-600' },
-          { label: 'Total Due', value: formatBDT(totals.due), color: 'text-red-500' },
-          { label: 'Total Expenses', value: formatBDT(totals.expenses), color: 'text-orange-500' },
+          { label: 'Total Expected', value: f.bdt(totals.expected), color: 'text-slate-800' },
+          { label: 'Total Collected', value: f.bdt(totals.collected), color: 'text-green-600' },
+          { label: 'Total Due', value: f.bdt(totals.due), color: 'text-red-500' },
+          { label: 'Total Expenses', value: f.bdt(totals.expenses), color: 'text-orange-500' },
         ].map((s) => (
           <Card key={s.label} className="p-4 text-center">
             <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-            <p className="text-xs text-slate-500 mt-0.5">{s.label}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{t(s.label)}</p>
           </Card>
         ))}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <Card className="p-4 text-center">
-          <p className="text-3xl font-bold text-indigo-600">{collectionRate}%</p>
-          <p className="text-xs text-slate-500 mt-0.5">Collection Rate</p>
+          <p className="text-3xl font-bold text-indigo-600">{f.digits(collectionRate)}%</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Collection Rate')}</p>
         </Card>
         <Card className="p-4 text-center">
           <p className={`text-3xl font-bold ${totals.collected - totals.expenses >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-            {formatBDT(totals.collected - totals.expenses)}
+            {f.bdt(totals.collected - totals.expenses)}
           </p>
-          <p className="text-xs text-slate-500 mt-0.5">Net Income</p>
+          <p className="text-xs text-slate-500 mt-0.5">{t('Net Income')}</p>
         </Card>
       </div>
 
       {/* Monthly Revenue vs Expenses */}
       <Card>
         <CardHeader>
-          <CardTitle>Monthly Collection vs Expenses — {reportYear}</CardTitle>
+          <CardTitle>{t('Monthly Collection vs Expenses — {year}', { year: reportYear })}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={monthlyData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(m: any) => f.shortMonth(Number(m))} />
                 <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={formatY} />
-                <Tooltip formatter={(v: any) => formatBDT(Number(v))} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                <Tooltip formatter={money} labelFormatter={(m: any) => f.month(Number(m))} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Collected" fill="#4f46e5" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Due" fill="#fca5a5" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Expenses" fill="#fdba74" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Collected" name={t('Collected')} fill="#4f46e5" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Due" name={t('Due')} fill="#fca5a5" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Expenses" name={t('Expenses')} fill="#fdba74" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -191,17 +192,17 @@ export default function ReportsClient({
       {/* Net Income Line Chart */}
       <Card>
         <CardHeader>
-          <CardTitle>Monthly Net Income</CardTitle>
+          <CardTitle>{t('Monthly Net Income')}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={monthlyData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(m: any) => f.shortMonth(Number(m))} />
                 <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={formatY} />
-                <Tooltip formatter={(v: any) => formatBDT(Number(v))} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                <Line type="monotone" dataKey="Net" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981' }} />
+                <Tooltip formatter={money} labelFormatter={(m: any) => f.month(Number(m))} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                <Line type="monotone" dataKey="Net" name={t('Net')} stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981' }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -211,20 +212,20 @@ export default function ReportsClient({
       {/* Collector Comparison */}
       <Card>
         <CardHeader>
-          <CardTitle>Collector Performance — {reportYear}</CardTitle>
+          <CardTitle>{t('Rent by owner — {year}', { year: reportYear })}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={collectorData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="name" tick={{ fontSize: 13, fill: '#374151', fontWeight: 600 }} />
+                <XAxis dataKey="name" tick={{ fontSize: 13, fill: '#374151', fontWeight: 600 }} tickFormatter={(n: any) => t(n)} />
                 <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={formatY} />
-                <Tooltip formatter={(v: any) => formatBDT(Number(v))} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                <Tooltip formatter={money} labelFormatter={(n: any) => t(n)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Expected" fill="#e0e7ff" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Collected" fill="#6366f1" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Due" fill="#fca5a5" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Expected" name={t('Expected')} fill="#e0e7ff" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Collected" name={t('Collected')} fill="#6366f1" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Due" name={t('Due')} fill="#fca5a5" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -235,19 +236,19 @@ export default function ReportsClient({
         {/* Expense Categories Pie */}
         {categoryData.length > 0 && (
           <Card>
-            <CardHeader><CardTitle>Expense Breakdown</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t('Expense Breakdown')}</CardTitle></CardHeader>
             <CardContent>
               <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie data={categoryData} cx="50%" cy="50%" outerRadius={70} dataKey="value"
-                                            label={({ name, percent }: any) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                      label={({ name, percent }: any) => `${t(formatExpenseCategory(name ?? ''))} ${f.digits(((percent ?? 0) * 100).toFixed(0))}%`}
                       labelLine={false}>
                       {categoryData.map((_, i) => (
                         <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(v: any) => formatBDT(Number(v))} />
+                    <Tooltip formatter={(v: any, name: any) => [money(v), t(formatExpenseCategory(name))]} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -258,19 +259,19 @@ export default function ReportsClient({
         {/* Payment Status Distribution */}
         {statusData.length > 0 && (
           <Card>
-            <CardHeader><CardTitle>Rent Record Status</CardTitle></CardHeader>
+            <CardHeader><CardTitle>{t('Rent Record Status')}</CardTitle></CardHeader>
             <CardContent>
               <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie data={statusData} cx="50%" cy="50%" outerRadius={70} dataKey="value"
-                      label={({ name, value }) => `${name}: ${value}`}
+                      label={({ name, value }: any) => `${t(capitalize(name ?? ''))}: ${f.digits(value)}`}
                       labelLine={false}>
                       {statusData.map((_, i) => (
                         <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip formatter={(v: any, name: any) => [f.digits(v), t(capitalize(name))]} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -281,38 +282,38 @@ export default function ReportsClient({
 
       {/* Monthly breakdown table */}
       <Card>
-        <CardHeader><CardTitle>Monthly Breakdown — {reportYear}</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t('Monthly Breakdown — {year}', { year: reportYear })}</CardTitle></CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   {['Month', 'Expected', 'Collected', 'Due', 'Expenses', 'Net'].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">{h}</th>
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">{t(h)}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {monthlyData.map((row, i) => (
                   <tr key={i} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-800">{row.month}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatBDT(row.Expected)}</td>
-                    <td className="px-4 py-3 text-green-600 font-medium">{formatBDT(row.Collected)}</td>
-                    <td className="px-4 py-3 text-red-500">{formatBDT(row.Due)}</td>
-                    <td className="px-4 py-3 text-orange-500">{formatBDT(row.Expenses)}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800">{f.month(row.month)}</td>
+                    <td className="px-4 py-3 text-slate-600">{f.bdt(row.Expected)}</td>
+                    <td className="px-4 py-3 text-green-600 font-medium">{f.bdt(row.Collected)}</td>
+                    <td className="px-4 py-3 text-red-500">{f.bdt(row.Due)}</td>
+                    <td className="px-4 py-3 text-orange-500">{f.bdt(row.Expenses)}</td>
                     <td className={`px-4 py-3 font-semibold ${row.Net >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      {formatBDT(row.Net)}
+                      {f.bdt(row.Net)}
                     </td>
                   </tr>
                 ))}
                 <tr className="bg-slate-50 font-semibold">
-                  <td className="px-4 py-3">Total</td>
-                  <td className="px-4 py-3">{formatBDT(totals.expected)}</td>
-                  <td className="px-4 py-3 text-green-600">{formatBDT(totals.collected)}</td>
-                  <td className="px-4 py-3 text-red-500">{formatBDT(totals.due)}</td>
-                  <td className="px-4 py-3 text-orange-500">{formatBDT(totals.expenses)}</td>
+                  <td className="px-4 py-3">{t('Total')}</td>
+                  <td className="px-4 py-3">{f.bdt(totals.expected)}</td>
+                  <td className="px-4 py-3 text-green-600">{f.bdt(totals.collected)}</td>
+                  <td className="px-4 py-3 text-red-500">{f.bdt(totals.due)}</td>
+                  <td className="px-4 py-3 text-orange-500">{f.bdt(totals.expenses)}</td>
                   <td className={`px-4 py-3 ${totals.collected - totals.expenses >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                    {formatBDT(totals.collected - totals.expenses)}
+                    {f.bdt(totals.collected - totals.expenses)}
                   </td>
                 </tr>
               </tbody>

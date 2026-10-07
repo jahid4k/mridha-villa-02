@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/db';
 import ElectricityBill from '@/models/ElectricityBill';
-import ElectricitySetting from '@/models/ElectricitySetting';
-import { createAuditLog } from '@/lib/audit';
 import { createElectricityBillSchema } from '@/lib/validators';
-import { calculateElectricityBill } from '@/lib/calculations';
+import { BillError, createElectricityBill, resolveElectricityRate } from '@/lib/electricity';
+import { translateError } from '@/lib/i18n';
+import { getLang } from '@/lib/i18n/server';
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -46,43 +46,20 @@ export async function POST(req: NextRequest) {
   }
 
   const username = (session.user as any).username;
-  const { month, year } = parsed.data;
+  const { month, year, ...reading } = parsed.data;
 
-  // Get or use provided rate
-  let globalRatePerUnit = parsed.data.globalRatePerUnit;
-  if (!globalRatePerUnit) {
-    const setting = await ElectricitySetting.findOne({ month, year });
-    globalRatePerUnit = setting?.globalRatePerUnit || 12;
+  const rate = await resolveElectricityRate(month, year);
+  if (!rate) {
+    return NextResponse.json({ error: 'Set an electricity rate first' }, { status: 400 });
   }
 
-  const calc = calculateElectricityBill({
-    previousReading: parsed.data.previousReading,
-    currentReading: parsed.data.currentReading,
-    globalRatePerUnit,
-    manualAdjustment: parsed.data.manualAdjustment || 0,
-  });
-
-  const bill = await ElectricityBill.create({
-    ...parsed.data,
-    globalRatePerUnit,
-    consumedUnits: calc.consumedUnits,
-    calculatedAmount: calc.calculatedAmount,
-    finalAmount: calc.finalAmount,
-    dueAmount: calc.finalAmount,
-    paidAmount: 0,
-    status: 'unpaid',
-    createdBy: username,
-    updatedBy: username,
-  });
-
-  await createAuditLog({
-    entityType: 'electricityBill',
-    entityId: bill._id.toString(),
-    action: 'create',
-    performedBy: username,
-    newData: { month, year, consumedUnits: calc.consumedUnits, finalAmount: calc.finalAmount },
-    note: `Created electricity bill: ${calc.consumedUnits} units @ ৳${globalRatePerUnit}/unit = ৳${calc.finalAmount}`,
-  });
-
-  return NextResponse.json({ bill }, { status: 201 });
+  try {
+    const bill = await createElectricityBill(reading, month, year, rate, username);
+    return NextResponse.json({ bill }, { status: 201 });
+  } catch (e) {
+    if (e instanceof BillError) {
+      return NextResponse.json({ error: translateError(await getLang(), e.message, e.vars) }, { status: e.status });
+    }
+    throw e;
+  }
 }

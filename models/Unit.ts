@@ -26,6 +26,8 @@ export interface IUnit extends Document {
   assignedCollector: Collector;
   status: UnitStatus;
   hasElectricitySubMeter: boolean;
+  /** Fixed gas charge billed automatically every month (0 = no gas). */
+  gasMonthlyCharge: number;
   electricityMeterNumber?: string;
   notes?: string;
   photos: ICloudinaryFile[];
@@ -74,6 +76,7 @@ const UnitSchema = new Schema<IUnit>(
       default: 'vacant',
     },
     hasElectricitySubMeter: { type: Boolean, default: false },
+    gasMonthlyCharge: { type: Number, default: 0, min: 0 },
     electricityMeterNumber: { type: String, trim: true },
     notes: { type: String },
     photos: { type: [CloudinaryFileSchema], default: [] },

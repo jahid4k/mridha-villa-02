@@ -2,6 +2,12 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export type BillStatus = 'unpaid' | 'partial' | 'paid' | 'archived';
 
+export interface IElectricityPayment {
+  amount: number;
+  paidAt: Date;
+  receivedBy: string;
+}
+
 export interface IElectricityBill extends Document {
   tenantId: mongoose.Types.ObjectId;
   leaseId: mongoose.Types.ObjectId;
@@ -19,6 +25,7 @@ export interface IElectricityBill extends Document {
   dueAmount: number;
   status: BillStatus;
   paymentDate?: Date;
+  payments: IElectricityPayment[];
   notes?: string;
   billPhoto?: any;
   createdBy: string;
@@ -39,6 +46,12 @@ const CloudinaryFileSchema = new Schema({
   size: { type: Number },
   uploadedBy: { type: String, required: true },
   uploadedAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const ElectricityPaymentSchema = new Schema({
+  amount: { type: Number, required: true, min: 0 },
+  paidAt: { type: Date, required: true },
+  receivedBy: { type: String, required: true },
 }, { _id: false });
 
 const ElectricityBillSchema = new Schema<IElectricityBill>(
@@ -78,6 +91,7 @@ const ElectricityBillSchema = new Schema<IElectricityBill>(
       default: 'unpaid',
     },
     paymentDate: { type: Date },
+    payments: { type: [ElectricityPaymentSchema], default: [] },
     notes: { type: String },
     billPhoto: { type: CloudinaryFileSchema },
     createdBy: { type: String, required: true },

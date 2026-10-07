@@ -131,9 +131,10 @@ export function calculateElectricityBill(input: ElectricityCalcInput): Electrici
   const manualAdjustment = input.manualAdjustment || 0;
   const paidAmount = Math.max(0, input.paidAmount || 0);
 
-  const consumedUnits = currentReading - previousReading;
-  const calculatedAmount = consumedUnits * globalRatePerUnit;
-  const finalAmount = Math.max(0, calculatedAmount + manualAdjustment);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const consumedUnits = round2(currentReading - previousReading);
+  const calculatedAmount = round2(consumedUnits * globalRatePerUnit);
+  const finalAmount = round2(Math.max(0, calculatedAmount + manualAdjustment));
   const dueAmount = Math.max(0, finalAmount - paidAmount);
 
   return {
@@ -144,6 +145,25 @@ export function calculateElectricityBill(input: ElectricityCalcInput): Electrici
     paidAmount,
     dueAmount,
   };
+}
+
+/**
+ * Due amount and status of a utility bill (electricity, gas) after payments.
+ */
+export function billStatus(finalAmount: number, paidAmount: number) {
+  const dueAmount = Math.max(0, Math.round((finalAmount - paidAmount) * 100) / 100);
+  const status = dueAmount === 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+  return { dueAmount, status } as const;
+}
+
+/**
+ * A month's rent is late once today (Dhaka date, "YYYY-MM-DD") is past the
+ * lease's due day in that month. Deed clause ৩.২: due between the 1st and the 7th.
+ */
+export function isRentLate(month: number, year: number, dueDay: number | undefined, today: string): boolean {
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const day = Math.min(dueDay || 7, lastDay);
+  return today > `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 /**
@@ -168,12 +188,9 @@ export function getMonthName(month: number): string {
 }
 
 /**
- * Get current month and year
+ * Get current month and year (Dhaka time)
  */
-export function getCurrentMonthYear(): { month: number; year: number } {
-  const now = new Date();
-  return { month: now.getMonth() + 1, year: now.getFullYear() };
-}
+export { getCurrentMonthYear } from '@/lib/formatters';
 
 /**
  * Determine rent record status based on amounts

@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "npx tsx scripts/seed.ts",
+    "seed:demo": "npx tsx scripts/seed-demo.ts",
+    "reset-password": "npx tsx scripts/reset-password.ts",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

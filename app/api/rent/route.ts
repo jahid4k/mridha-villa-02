@@ -5,7 +5,7 @@ import RentRecord from '@/models/RentRecord';
 import Lease from '@/models/Lease';
 import { createAuditLog } from '@/lib/audit';
 import { generateRentRecordSchema } from '@/lib/validators';
-import { calculateRent, calculateAdvanceAdjustment } from '@/lib/calculations';
+import { createRentRecord } from '@/lib/billing';
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   const records = await RentRecord.find(query)
     .populate('tenantId', 'name phone')
-    .populate('leaseId', 'monthlyRentAmount advanceBalance')
+    .populate('leaseId', 'monthlyRentAmount advanceBalance collector rentDueDay')
     .populate('unitIds', 'unitName unitNumber')
     .sort({ year: -1, month: -1, createdAt: -1 })
     .lean();
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
   const { leaseId, month, year, extraCharges = 0, discount = 0, notes } = parsed.data;
 
   // Load lease
-  const lease = await Lease.findById(leaseId).populate('unitIds', 'unitName assignedCollector');
+  const lease: any = await Lease.findById(leaseId).lean();
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
   if (lease.status !== 'active') {
     return NextResponse.json({ error: 'Can only generate rent for active leases' }, { status: 400 });
@@ -66,70 +66,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Rent record for ${month}/${year} already exists for this lease` }, { status: 409 });
   }
 
-  // Find previous due from last month's record
-  const lastMonth = month === 1 ? 12 : month - 1;
-  const lastYear = month === 1 ? year - 1 : year;
-  const prevRecord = await RentRecord.findOne({
-    leaseId,
-    month: lastMonth,
-    year: lastYear,
-    status: { $ne: 'archived' },
-  });
-  const previousDue = prevRecord?.dueAmount || 0;
-
-  // Calculate advance adjustment
-  const baseRent = lease.monthlyRentAmount;
-  const rawPayable = baseRent + previousDue + extraCharges - discount;
-  const { advanceAdjustment, remainingAdvance } = calculateAdvanceAdjustment(
-    rawPayable,
-    lease.advanceBalance
-  );
-
-  // Final calculation
-  const result = calculateRent({
-    baseRent,
-    previousDue,
-    extraCharges,
-    discount,
-    advanceAdjustment,
-    collectedAmount: 0,
-  });
-
-  const record = await RentRecord.create({
-    tenantId: lease.tenantId,
-    leaseId: lease._id,
-    unitIds: lease.unitIds,
-    collector: lease.collector,
-    month,
-    year,
-    baseRent: result.baseRent,
-    previousDue: result.previousDue,
-    extraCharges: result.extraCharges,
-    discount: result.discount,
-    advanceAdjustment: result.advanceAdjustment,
-    totalPayable: result.totalPayable,
-    collectedAmount: 0,
-    dueAmount: result.dueAmount,
-    advanceCreated: 0,
-    status: result.status,
-    notes,
-    generatedBy: username,
-    createdBy: username,
-    updatedBy: username,
-  });
-
-  // Update lease advance balance if adjusted
-  if (advanceAdjustment > 0) {
-    lease.advanceBalance = remainingAdvance;
-    await lease.save();
-  }
+  // Same rules as automatic billing: this month's rent only (earlier dues
+  // stay on their own months), with the lease's advance rule and credit.
+  const record = await createRentRecord(lease, month, year, { extraCharges, discount, notes }, username);
 
   await createAuditLog({
     entityType: 'rentRecord',
     entityId: record._id.toString(),
     action: 'generate',
     performedBy: username,
-    newData: { month, year, baseRent, totalPayable: result.totalPayable, advanceAdjustment },
+    newData: { month, year, baseRent: record.baseRent, totalPayable: record.totalPayable, advanceAdjustment: record.advanceAdjustment },
     note: `Generated rent record for ${month}/${year}`,
   });
 

@@ -14,6 +14,7 @@ export interface IRentRecord extends Document {
   extraCharges: number;
   discount: number;
   advanceAdjustment: number;
+  creditApplied: number;
   totalPayable: number;
   collectedAmount: number;
   dueAmount: number;
@@ -57,7 +58,10 @@ const RentRecordSchema = new Schema<IRentRecord>(
     previousDue: { type: Number, default: 0, min: 0 },
     extraCharges: { type: Number, default: 0, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
+    // Deed advance deducted this month plus any credit (earlier overpayment) used.
     advanceAdjustment: { type: Number, default: 0, min: 0 },
+    // The credit part of advanceAdjustment, kept so the two can be told apart.
+    creditApplied: { type: Number, default: 0, min: 0 },
     totalPayable: { type: Number, required: true, min: 0 },
     collectedAmount: { type: Number, default: 0, min: 0 },
     dueAmount: { type: Number, default: 0 },
@@ -79,7 +83,6 @@ const RentRecordSchema = new Schema<IRentRecord>(
 );
 
 RentRecordSchema.index({ tenantId: 1, month: 1, year: 1 });
-RentRecordSchema.index({ leaseId: 1, month: 1, year: 1 });
 RentRecordSchema.index({ month: 1, year: 1 });
 RentRecordSchema.index({ status: 1 });
 RentRecordSchema.index({ collector: 1, month: 1, year: 1 });

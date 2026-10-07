@@ -27,7 +27,6 @@ export async function GET(req: NextRequest) {
   }
 
   const tenants = await Tenant.find(query)
-    .populate('activeLeaseIds', 'monthlyRentAmount status unitIds')
     .sort({ createdAt: -1 })
     .lean();
 
@@ -50,7 +49,6 @@ export async function POST(req: NextRequest) {
   const tenant = await Tenant.create({
     ...parsed.data,
     documents: [],
-    activeLeaseIds: [],
     createdBy: username,
     updatedBy: username,
   });
